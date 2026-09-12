@@ -11,7 +11,6 @@ import {
 } from "@autocfo/shared";
 import {
   classifyPrivyError,
-  proposeTransferIntent,
   publicClient,
   requiredEnv,
   sendUsdcFromTreasury,
@@ -138,7 +137,7 @@ export const cfoTools = {
 
   propose_approval: tool({
     description:
-      "Escalate an over-threshold or off-allowlist invoice: proposes a Privy transfer intent that a human approves with MFA in the Privy Dashboard. Execution happens automatically once the quorum approves.",
+      "Escalate an over-threshold or off-allowlist invoice for human sign-off. The payment is queued; only a human, authorizing with the owner quorum key (which you do not hold), can execute it. Provide a justification the approver can act on.",
     inputSchema: z.object({
       invoiceId: z.string(),
       justification: z
@@ -149,24 +148,21 @@ export const cfoTools = {
       const db = getDb();
       const inv = db.select().from(invoices).where(eq(invoices.id, invoiceId)).get();
       if (!inv) return { error: "invoice not found" };
+      if (inv.status !== "pending") return { error: `invoice is ${inv.status}` };
       const payee = db.select().from(payees).where(eq(payees.id, inv.payeeId)).get();
       if (!payee) return { error: "payee not found" };
       const amount = baseUnitsToUsdc(BigInt(inv.amountBaseUnits));
-      const { intentId, status } = await proposeTransferIntent(
-        payee.address as `0x${string}`,
-        amount,
-      );
       db.update(invoices)
-        .set({ status: "awaiting_approval", privyIntentId: intentId })
+        .set({ status: "awaiting_approval" })
         .where(eq(invoices.id, invoiceId))
         .run();
       logActivity({
         kind: "intent_proposed",
-        summary: `Proposed ${amount} USDC to ${payee.name} for human approval`,
-        detail: { signal: "over_threshold", justification, intentId, status },
+        summary: `Queued ${amount} USDC to ${payee.name} for owner approval`,
+        detail: { signal: "over_threshold", justification },
         invoiceId,
       });
-      return { intentId, status, awaitingHumanApproval: true };
+      return { queued: true, awaitingHumanApproval: true };
     },
   }),
 
@@ -293,6 +289,8 @@ export const cfoTools = {
     }),
     execute: async ({ invoiceId, reason }) => {
       const db = getDb();
+      const inv = db.select().from(invoices).where(eq(invoices.id, invoiceId)).get();
+      if (!inv) return { error: `invoice ${invoiceId} not found — check the exact id` };
       db.update(invoices)
         .set({ status: "flagged" })
         .where(eq(invoices.id, invoiceId))

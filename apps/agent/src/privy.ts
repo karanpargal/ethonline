@@ -35,11 +35,18 @@ export const publicClient = () => {
   return createPublicClient({ chain, transport: http() });
 };
 
-// The agent's P-256 authorization key (base64 PKCS8, from setup-privy.ts).
-// Passed per-call — the SDK computes the privy-authorization-signature header.
-function agentAuthContext() {
+// P-256 authorization keys (base64 PKCS8, from setup-privy.ts), passed per-call —
+// the SDK computes the privy-authorization-signature header.
+// - agent: the bounded signer; every request is checked against the mandate policy.
+// - owner: the human/admin quorum key; NOT policy-bounded. Used only by the
+//   explicit human-approval endpoint, never by the agent's tools.
+export type Signer = "agent" | "owner";
+
+function authContext(signer: Signer) {
   return {
-    authorization_private_keys: [requiredEnv("PRIVY_AGENT_AUTH_KEY")],
+    authorization_private_keys: [
+      requiredEnv(signer === "owner" ? "PRIVY_ADMIN_AUTH_KEY" : "PRIVY_AGENT_AUTH_KEY"),
+    ],
   };
 }
 
@@ -61,6 +68,7 @@ export interface SendResult {
 export async function sendUsdcFromTreasury(
   to: `0x${string}`,
   baseUnits: bigint,
+  signer: Signer = "agent",
 ): Promise<SendResult> {
   const privy = getPrivy();
   const walletId = requiredEnv("PRIVY_TREASURY_WALLET_ID");
@@ -85,7 +93,7 @@ export async function sendUsdcFromTreasury(
           max_priority_fee_per_gas: "0x0",
         },
       },
-      authorization_context: agentAuthContext(),
+      authorization_context: authContext(signer),
     });
     return { hash, mode: "privy-broadcast" };
   }
@@ -113,7 +121,7 @@ export async function sendUsdcFromTreasury(
         type: 2,
       },
     },
-    authorization_context: agentAuthContext(),
+    authorization_context: authContext(signer),
   });
   const hash = await pub.sendRawTransaction({
     serializedTransaction: signed.signed_transaction as `0x${string}`,
@@ -121,33 +129,10 @@ export async function sendUsdcFromTreasury(
   return { hash, mode: "sign-local" };
 }
 
-/**
- * Over-threshold / off-allowlist path: propose a transfer intent.
- * No authorization signature needed at proposal time — humans approve
- * asynchronously in the Privy Dashboard (MFA), Privy executes at quorum.
- */
-export async function proposeTransferIntent(
-  to: `0x${string}`,
-  usdcAmount: string,
-): Promise<{ intentId: string; status: string }> {
-  const privy = getPrivy();
-  const walletId = requiredEnv("PRIVY_TREASURY_WALLET_ID");
-  const intent = await privy.intents().transfer(walletId, {
-    source: { asset: "usdc", chain: chainNameForIntents() },
-    destination: { address: to },
-    amount: usdcAmount,
-  });
-  return { intentId: intent.intent_id, status: intent.status };
-}
-
-export async function getIntent(intentId: string) {
-  return getPrivy().intents().get(intentId);
-}
-
-// Privy intents take a chain slug, not CAIP-2. Verified during Day-0 spike.
-function chainNameForIntents(): string {
-  return process.env.PRIVY_INTENT_CHAIN ?? "arc-testnet";
-}
+// NOTE: Privy transfer intents do NOT support Arc (verified 2026-09-13; the API
+// enumerates its supported chains and Arc is absent). The escalation flow instead
+// queues over-mandate payments in-app; a human approval executes them with the
+// owner quorum key via sendUsdcFromTreasury(to, amount, "owner").
 
 /** Classify a failed Privy send so the agent can react correctly. */
 export function classifyPrivyError(

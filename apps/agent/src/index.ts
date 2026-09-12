@@ -5,11 +5,16 @@ import { serve } from "@hono/node-server";
 import { desc, eq } from "drizzle-orm";
 import { getDb, activity, invoices, payees } from "@autocfo/shared/db";
 import { erc20Abi } from "viem";
-import { baseUnitsToUsdc, getChainProfile } from "@autocfo/shared";
+import {
+  baseUnitsToUsdc,
+  explorerTxUrl,
+  getChainProfile,
+} from "@autocfo/shared";
 import { runCfoTick } from "./agent.js";
-import { getIntent, publicClient } from "./privy.js";
+import { publicClient, sendUsdcFromTreasury } from "./privy.js";
 import { pettyCashState } from "./pettycash.js";
 import { startSeller } from "./seller.js";
+import { logActivity } from "./activity.js";
 
 const app = new Hono();
 app.use("*", cors());
@@ -41,9 +46,54 @@ app.get("/activity", (c) => {
   return c.json(rows.map((r) => ({ ...r, detail: JSON.parse(r.detail) })));
 });
 
-app.get("/intents/:id", async (c) => {
-  const intent = await getIntent(c.req.param("id"));
-  return c.json(intent);
+// Human approval endpoints. Approve executes with the OWNER quorum key —
+// the one key the agent never holds. This is the escalation path's second half.
+app.post("/invoices/:id/approve", async (c) => {
+  const id = c.req.param("id");
+  const db = getDb();
+  const inv = db.select().from(invoices).where(eq(invoices.id, id)).get();
+  if (!inv) return c.json({ error: "invoice not found" }, 404);
+  if (inv.status !== "awaiting_approval")
+    return c.json({ error: `invoice is ${inv.status}` }, 409);
+  const payee = db.select().from(payees).where(eq(payees.id, inv.payeeId)).get();
+  if (!payee) return c.json({ error: "payee not found" }, 404);
+  try {
+    const { hash } = await sendUsdcFromTreasury(
+      payee.address as `0x${string}`,
+      BigInt(inv.amountBaseUnits),
+      "owner",
+    );
+    db.update(invoices).set({ status: "paid", txHash: hash }).where(eq(invoices.id, id)).run();
+    logActivity({
+      kind: "invoice_paid",
+      summary: `Owner approved: paid ${baseUnitsToUsdc(BigInt(inv.amountBaseUnits))} USDC to ${payee.name}`,
+      detail: {
+        signal: "human_approval",
+        approvedWith: "owner quorum key",
+        explorer: explorerTxUrl(hash),
+      },
+      invoiceId: id,
+      txHash: hash,
+    });
+    return c.json({ paid: true, txHash: hash });
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+});
+
+app.post("/invoices/:id/reject", async (c) => {
+  const id = c.req.param("id");
+  const db = getDb();
+  const inv = db.select().from(invoices).where(eq(invoices.id, id)).get();
+  if (!inv) return c.json({ error: "invoice not found" }, 404);
+  db.update(invoices).set({ status: "rejected" }).where(eq(invoices.id, id)).run();
+  logActivity({
+    kind: "agent_note",
+    summary: `Owner rejected invoice ${id}`,
+    detail: { signal: "human_rejection" },
+    invoiceId: id,
+  });
+  return c.json({ rejected: true });
 });
 
 // Balance card data. Each lane resolves independently and tolerates missing

@@ -1,7 +1,12 @@
 import "./env.js";
-import { randomUUID } from "node:crypto";
 import { getDb, invoices, payees } from "@autocfo/shared/db";
 import { usdcToBaseUnits } from "@autocfo/shared";
+
+// Short, distinct ids — long UUIDs get garbled by LLM tool calls.
+let payeeSeq = 0;
+let invoiceSeq = 0;
+const payeeId = () => `PAYEE-${++payeeSeq}`;
+const invoiceId = () => `INV-${1000 + ++invoiceSeq}`;
 
 // Demo data: two allowlisted vendors, one contractor on another chain,
 // one big invoice (escalation beat), one duplicate (anomaly beat).
@@ -11,9 +16,9 @@ const now = Date.now();
 const day = 24 * 60 * 60 * 1000;
 
 const vendorIds = {
-  hosting: randomUUID(),
-  dataApi: randomUUID(),
-  contractor: randomUUID(),
+  hosting: payeeId(),
+  dataApi: payeeId(),
+  contractor: payeeId(),
 };
 
 db.insert(payees)
@@ -48,7 +53,7 @@ db.insert(payees)
 db.insert(invoices)
   .values([
     {
-      id: randomUUID(),
+      id: invoiceId(),
       payeeId: vendorIds.hosting,
       amountBaseUnits: usdcToBaseUnits("5").toString(),
       memo: "September cloud hosting",
@@ -57,16 +62,17 @@ db.insert(invoices)
       createdAt: new Date(now - 5 * day),
     },
     {
-      id: randomUUID(),
+      id: invoiceId(),
       payeeId: vendorIds.dataApi,
-      amountBaseUnits: usdcToBaseUnits("500").toString(),
+      // Deliberately over the $10 per-tx cap → the escalation demo beat.
+      amountBaseUnits: usdcToBaseUnits("12").toString(),
       memo: "Enterprise data license renewal (annual)",
       dueDate: new Date(now),
       status: "pending",
       createdAt: new Date(now - 2 * day),
     },
     {
-      id: randomUUID(),
+      id: invoiceId(),
       payeeId: vendorIds.hosting,
       amountBaseUnits: usdcToBaseUnits("5").toString(),
       memo: "September cloud hosting",
@@ -75,9 +81,9 @@ db.insert(invoices)
       createdAt: new Date(now - day),
     },
     {
-      id: randomUUID(),
+      id: invoiceId(),
       payeeId: vendorIds.contractor,
-      amountBaseUnits: usdcToBaseUnits("12").toString(),
+      amountBaseUnits: usdcToBaseUnits("2").toString(),
       memo: "Design sprint milestone 2",
       dueDate: new Date(now + day),
       status: "pending",

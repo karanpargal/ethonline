@@ -41,6 +41,19 @@ export default function Dashboard() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [instruction, setInstruction] = useState("");
+  const [approving, setApproving] = useState<string | null>(null);
+
+  const decide = async (invoiceId: string, action: "approve" | "reject") => {
+    setApproving(invoiceId);
+    try {
+      await (action === "approve" ? api.approve(invoiceId) : api.reject(invoiceId));
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApproving(null);
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -196,7 +209,24 @@ export default function Dashboard() {
                       })}
                     </td>
                     <td className="py-3 pl-6 text-right">
-                      {row.invoices.txHash ? (
+                      {row.invoices.status === "awaiting_approval" ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <button
+                            disabled={approving === row.invoices.id}
+                            onClick={() => decide(row.invoices.id, "approve")}
+                            className="border border-paid bg-paid-bg px-2 py-0.5 text-xs text-paid transition hover:bg-paid hover:text-field disabled:opacity-40"
+                          >
+                            {approving === row.invoices.id ? "signing…" : "approve"}
+                          </button>
+                          <button
+                            disabled={approving === row.invoices.id}
+                            onClick={() => decide(row.invoices.id, "reject")}
+                            className="border border-alert bg-alert-bg px-2 py-0.5 text-xs text-alert transition hover:bg-alert hover:text-field disabled:opacity-40"
+                          >
+                            reject
+                          </button>
+                        </span>
+                      ) : row.invoices.txHash ? (
                         <a
                           href={`https://testnet.arcscan.app/tx/${row.invoices.txHash}`}
                           target="_blank"

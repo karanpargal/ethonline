@@ -55,10 +55,23 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
+async function post<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `${path}: ${res.status}`);
+  }
+  return res.json();
+}
+
 export const api = {
   invoices: () => get<InvoiceRow[]>("/invoices"),
   activity: () => get<ActivityRow[]>("/activity"),
   treasury: () => get<TreasuryState>("/treasury"),
+  approve: (invoiceId: string) =>
+    post<{ paid: boolean; txHash: string }>(`/invoices/${invoiceId}/approve`),
+  reject: (invoiceId: string) =>
+    post<{ rejected: boolean }>(`/invoices/${invoiceId}/reject`),
   tick: async (instruction?: string): Promise<TickResult> => {
     const res = await fetch(`${BASE}/agent/tick`, {
       method: "POST",
