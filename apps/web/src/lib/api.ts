@@ -34,6 +34,21 @@ export interface TickResult {
   steps: { toolCalls: { tool: string; input: unknown }[] }[];
 }
 
+export interface TreasuryState {
+  treasury: { address: string; usdcBalance: string } | null;
+  pettyCash: {
+    address: string;
+    balances?: {
+      wallet?: { balance?: string; formatted?: string };
+      gateway?: {
+        available?: string;
+        formattedAvailable?: string;
+        formattedTotal?: string;
+      };
+    };
+  } | null;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`${path}: ${res.status}`);
@@ -43,6 +58,7 @@ async function get<T>(path: string): Promise<T> {
 export const api = {
   invoices: () => get<InvoiceRow[]>("/invoices"),
   activity: () => get<ActivityRow[]>("/activity"),
+  treasury: () => get<TreasuryState>("/treasury"),
   tick: async (instruction?: string): Promise<TickResult> => {
     const res = await fetch(`${BASE}/agent/tick`, {
       method: "POST",

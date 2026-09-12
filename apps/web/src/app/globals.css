@@ -1,26 +1,70 @@
 @import "tailwindcss";
 
+/* Paper-ledger palette: warm field, ink text, brass accent, hairline rules.
+   One deliberate light look — no dark variant. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --field: #faf8f0;
+  --field-raised: #ffffff;
+  --field-sunken: #f3f0e4;
+  --ink: #1b1b18;
+  --ink-soft: #6b6757;
+  --ink-faint: #a39e8c;
+  --line: #e3ddc9;
+  --line-strong: #cfc8ae;
+  --brass: #c9a86a;
+  --brass-ink: #8a6c2e;
+  --paid: #0e5b54;
+  --paid-bg: #e4efe9;
+  --alert: #b3311c;
+  --alert-bg: #f8e7e0;
+  --hold: #16418c;
+  --hold-bg: #e5ecf8;
+  --flag: #8a6c2e;
+  --flag-bg: #f5ecd7;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-field: var(--field);
+  --color-field-raised: var(--field-raised);
+  --color-field-sunken: var(--field-sunken);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-brass: var(--brass);
+  --color-brass-ink: var(--brass-ink);
+  --color-paid: var(--paid);
+  --color-paid-bg: var(--paid-bg);
+  --color-alert: var(--alert);
+  --color-alert-bg: var(--alert-bg);
+  --color-hold: var(--hold);
+  --color-hold-bg: var(--hold-bg);
+  --color-flag: var(--flag);
+  --color-flag-bg: var(--flag-bg);
+  --font-display: var(--font-display);
+  --font-ui: var(--font-ui);
+  --font-ledger: var(--font-ledger);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-ui), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), Georgia, serif;
+}
+
+.font-ledger {
+  font-family: var(--font-ledger), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.micro-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
 }
