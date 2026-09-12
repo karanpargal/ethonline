@@ -48,6 +48,53 @@ paid out cross-chain.
    `buy a market brief` → the agent pays $0.001 over x402 from the petty-cash
    Gateway balance (gasless), or `top up petty cash with 2 USDC`.
 
+## Video flow — the whole product without leaving the UI (~3 min)
+
+Prep (off-camera): `pnpm --filter @autocfo/agent demo:reset`, both faucet
+balances topped up, browser on http://localhost:3000, zoom ~110%.
+
+**Scene 1 — The problem & the ledger (0:00–0:30).**
+Start on the dashboard. Point at the balance strip: "This is AutoCFO — an AI
+CFO holding a real company treasury in USDC on Arc. It's not a wallet with a
+chatbot: the treasury is a Privy organization wallet, and the agent is a
+bounded signer whose mandate — payee allowlist, $10 per-transaction cap — is
+enforced by a policy engine inside a TEE, not by a prompt." Scroll the ledger:
+four pending invoices, one visibly a duplicate, one over the cap.
+
+**Scene 2 — A bill arrives (0:30–0:50).**
+Click **+ new invoice**. Pick NimbusHost, amount **4**, memo "CDN overage",
+due **today**, add. "An invoice just landed. Nobody has to wake up for this."
+
+**Scene 3 — The agent works (0:50–1:50).**
+Click **Run tick**. While it thinks, narrate the mandate footer. As results
+land, walk the audit trail bottom-up:
+- your $4 invoice + the $5 hosting bill: **paid on Arc** — click one
+  **proof ↗** link, show the tx on Arcscan, come back.
+- Dana Contractor: **paid cross-chain** — the treasury lives on Arc, Dana
+  wants Base Sepolia; Circle Gateway minted it there in under a second.
+- the duplicate invoice: **flagged**, not paid — same payee, same amount,
+  same due date.
+- the $12 license renewal: **awaiting approval** — over the $10 cap, so the
+  agent physically cannot pay it; its key is rejected by the policy.
+Read the agent memo card aloud — it explains its own reasoning.
+
+**Scene 4 — Human in the loop (1:50–2:20).**
+Point at the amber "awaiting approval · action required" stat. Click
+**approve** on the row. "This signature comes from the owner quorum key —
+a key the agent never holds. Autonomy inside the mandate, cryptography at the
+boundary." Status flips to paid with its own proof link.
+
+**Scene 5 — Agents buying data, x402 (2:20–2:50).**
+Type `buy a market brief` in the header box, **Run tick**. Show the
+x402 purchase in the trail: "$0.001, paid gaslessly over the x402 protocol
+from a capped petty-cash balance in Circle Gateway — batched settlement, so
+sub-cent payments actually work. The agent funds its own tools."
+
+**Scene 6 — Close (2:50–3:10).**
+Balance strip again: treasury down by exactly the paid invoices, every row in
+the trail traces signal → decision → on-chain proof. "An autonomous CFO you
+can audit line by line — and overrule with a better key."
+
 ## 4. Verify balances / funding state anytime
 
 ```bash
