@@ -9,6 +9,7 @@ import {
   baseUnitsToUsdc,
   explorerTxUrl,
   getChainProfile,
+  usdcToBaseUnits,
 } from "@autocfo/shared";
 import { runCfoTick } from "./agent.js";
 import { publicClient, sendUsdcFromTreasury } from "./privy.js";
@@ -25,6 +26,37 @@ app.post("/agent/tick", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const result = await runCfoTick(body.instruction);
   return c.json(result);
+});
+
+app.get("/payees", (c) => {
+  return c.json(getDb().select().from(payees).all());
+});
+
+// Create an invoice from the dashboard ("upload" an incoming bill).
+app.post("/invoices", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body?.payeeId || !body?.amountUsdc || !body?.memo)
+    return c.json({ error: "payeeId, amountUsdc, memo required" }, 400);
+  const db = getDb();
+  const payee = db.select().from(payees).where(eq(payees.id, body.payeeId)).get();
+  if (!payee) return c.json({ error: "payee not found" }, 404);
+  const count = db.select().from(invoices).all().length;
+  const id = `INV-${2000 + count}`;
+  const dueDate = body.dueDate
+    ? new Date(body.dueDate)
+    : new Date(Date.now() + (Number(body.dueInDays ?? 0) || 0) * 86_400_000);
+  db.insert(invoices)
+    .values({
+      id,
+      payeeId: payee.id,
+      amountBaseUnits: usdcToBaseUnits(String(body.amountUsdc)).toString(),
+      memo: String(body.memo),
+      dueDate,
+      status: "pending",
+      createdAt: new Date(),
+    })
+    .run();
+  return c.json({ id, created: true });
 });
 
 app.get("/invoices", (c) => {

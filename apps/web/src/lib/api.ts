@@ -55,13 +55,25 @@ async function get<T>(path: string): Promise<T> {
   return res.json();
 }
 
-async function post<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "POST" });
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `${path}: ${res.status}`);
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `${path}: ${res.status}`);
   }
   return res.json();
+}
+
+export interface Payee {
+  id: string;
+  name: string;
+  address: string;
+  preferredChain: string;
+  allowlisted: boolean;
 }
 
 export const api = {
@@ -72,6 +84,13 @@ export const api = {
     post<{ paid: boolean; txHash: string }>(`/invoices/${invoiceId}/approve`),
   reject: (invoiceId: string) =>
     post<{ rejected: boolean }>(`/invoices/${invoiceId}/reject`),
+  payees: () => get<Payee[]>("/payees"),
+  createInvoice: (input: {
+    payeeId: string;
+    amountUsdc: string;
+    memo: string;
+    dueInDays: number;
+  }) => post<{ id: string; created: boolean }>("/invoices", input),
   tick: async (instruction?: string): Promise<TickResult> => {
     const res = await fetch(`${BASE}/agent/tick`, {
       method: "POST",

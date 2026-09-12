@@ -6,6 +6,7 @@ import {
   formatUsdc,
   type ActivityRow,
   type InvoiceRow,
+  type Payee,
   type TickResult,
   type TreasuryState,
 } from "@/lib/api";
@@ -172,7 +173,7 @@ export default function Dashboard() {
           {/* Ledger */}
           <div className="flex items-baseline justify-between">
             <h2 className="font-display text-xl">Ledger</h2>
-            <span className="micro-label">USDC · Arc testnet</span>
+            <NewInvoice onCreated={refresh} />
           </div>
           <table className="mt-3 w-full border-t border-ink text-sm">
             <thead>
@@ -321,6 +322,115 @@ export default function Dashboard() {
         Mandate: allowlisted payees · per-tx cap · daily budget — enforced by
         Privy policies in a TEE. Over-mandate spend requires human MFA approval.
       </footer>
+    </div>
+  );
+}
+
+function NewInvoice({ onCreated }: { onCreated: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [payees, setPayees] = useState<Payee[]>([]);
+  const [payeeId, setPayeeId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [memo, setMemo] = useState("");
+  const [dueInDays, setDueInDays] = useState("0");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      api.payees().then((p) => {
+        setPayees(p);
+        if (p.length && !payeeId) setPayeeId(p[0].id);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const submit = async () => {
+    if (!payeeId || !amount || !memo) {
+      setErr("all fields required");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.createInvoice({
+        payeeId,
+        amountUsdc: amount,
+        memo,
+        dueInDays: Number(dueInDays),
+      });
+      setAmount("");
+      setMemo("");
+      setOpen(false);
+      await onCreated();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="micro-label border border-line-strong px-2.5 py-1 transition hover:border-ink hover:text-ink"
+      >
+        + new invoice
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={payeeId}
+        onChange={(e) => setPayeeId(e.target.value)}
+        className="border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      >
+        {payees.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+      <input
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        placeholder="USDC"
+        className="font-ledger w-20 border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      />
+      <input
+        value={memo}
+        onChange={(e) => setMemo(e.target.value)}
+        placeholder="memo"
+        className="w-40 border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      />
+      <select
+        value={dueInDays}
+        onChange={(e) => setDueInDays(e.target.value)}
+        className="border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      >
+        <option value="-1">overdue</option>
+        <option value="0">due today</option>
+        <option value="3">due in 3d</option>
+        <option value="14">due in 14d</option>
+      </select>
+      <button
+        onClick={submit}
+        disabled={busy}
+        className="border border-ink bg-ink px-2.5 py-1 text-xs text-field transition hover:bg-ink/85 disabled:opacity-40"
+      >
+        {busy ? "adding…" : "add"}
+      </button>
+      <button
+        onClick={() => setOpen(false)}
+        className="px-1 text-xs text-ink-faint hover:text-ink"
+      >
+        ✕
+      </button>
+      {err && <span className="text-xs text-alert">{err}</span>}
     </div>
   );
 }

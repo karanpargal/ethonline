@@ -1,5 +1,5 @@
 import "./env.js";
-import { getDb, invoices, payees } from "@autocfo/shared/db";
+import { activity, getDb, invoices, payees } from "@autocfo/shared/db";
 import { usdcToBaseUnits } from "@autocfo/shared";
 
 // Short, distinct ids — long UUIDs get garbled by LLM tool calls.
@@ -10,7 +10,15 @@ const invoiceId = () => `INV-${1000 + ++invoiceSeq}`;
 
 // Demo data: two allowlisted vendors, one contractor on another chain,
 // one big invoice (escalation beat), one duplicate (anomaly beat).
+// Pass --reset to wipe existing rows first (clean demo takes).
 const db = getDb();
+
+if (process.argv.includes("--reset")) {
+  db.delete(activity).run();
+  db.delete(invoices).run();
+  db.delete(payees).run();
+  console.log("Cleared existing payees, invoices, and activity.");
+}
 
 const now = Date.now();
 const day = 24 * 60 * 60 * 1000;
