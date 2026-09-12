@@ -1,0 +1,158 @@
+import { PrivyClient } from "@privy-io/node";
+import {
+  createPublicClient,
+  createWalletClient,
+  encodeFunctionData,
+  erc20Abi,
+  http,
+  parseGwei,
+} from "viem";
+import {
+  ARC_MIN_BASE_FEE_GWEI,
+  getChainProfile,
+} from "@autocfo/shared/chain";
+
+let _privy: PrivyClient | null = null;
+
+export function getPrivy(): PrivyClient {
+  if (!_privy) {
+    _privy = new PrivyClient({
+      appId: requiredEnv("PRIVY_APP_ID"),
+      appSecret: requiredEnv("PRIVY_APP_SECRET"),
+    });
+  }
+  return _privy;
+}
+
+export function requiredEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env var ${name}`);
+  return v;
+}
+
+export const publicClient = () => {
+  const { chain } = getChainProfile();
+  return createPublicClient({ chain, transport: http() });
+};
+
+// The agent's P-256 authorization key (base64 PKCS8, from setup-privy.ts).
+// Passed per-call — the SDK computes the privy-authorization-signature header.
+function agentAuthContext() {
+  return {
+    authorization_private_keys: [requiredEnv("PRIVY_AGENT_AUTH_KEY")],
+  };
+}
+
+export interface SendResult {
+  hash: string;
+  mode: "privy-broadcast" | "sign-local";
+}
+
+/**
+ * Pay `baseUnits` of USDC (6-dec ERC-20) from the Privy treasury wallet to `to`.
+ *
+ * Privy's policy engine evaluates this request inside the TEE before signing —
+ * a policy denial surfaces as a Privy API error, distinct from an on-chain revert
+ * (simulation runs BEFORE policy evaluation, so reverts also pre-empt policy).
+ *
+ * PRIVY_SEND_MODE=broadcast   → Privy signs AND broadcasts (needs Arc support on their side)
+ * PRIVY_SEND_MODE=sign-local  → Privy signs (policies still apply), we broadcast via viem (fallback A)
+ */
+export async function sendUsdcFromTreasury(
+  to: `0x${string}`,
+  baseUnits: bigint,
+): Promise<SendResult> {
+  const privy = getPrivy();
+  const walletId = requiredEnv("PRIVY_TREASURY_WALLET_ID");
+  const { chain, usdc, caip2 } = getChainProfile();
+  const data = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "transfer",
+    args: [to, baseUnits],
+  });
+  const mode = process.env.PRIVY_SEND_MODE ?? "broadcast";
+
+  if (mode === "broadcast") {
+    const { hash } = await privy.wallets().ethereum().sendTransaction(walletId, {
+      caip2,
+      params: {
+        transaction: {
+          to: usdc,
+          data,
+          value: "0x0",
+          chain_id: chain.id,
+          max_fee_per_gas: `0x${parseGwei(String(ARC_MIN_BASE_FEE_GWEI * 2n)).toString(16)}`,
+          max_priority_fee_per_gas: "0x0",
+        },
+      },
+      authorization_context: agentAuthContext(),
+    });
+    return { hash, mode: "privy-broadcast" };
+  }
+
+  // Fallback A: Privy signs (policy-checked), we broadcast against Arc RPC ourselves.
+  const pub = publicClient();
+  const treasury = requiredEnv("PRIVY_TREASURY_ADDRESS") as `0x${string}`;
+  const nonce = await pub.getTransactionCount({ address: treasury });
+  const gas = await pub.estimateGas({
+    account: treasury,
+    to: usdc,
+    data,
+  });
+  const signed = await privy.wallets().ethereum().signTransaction(walletId, {
+    params: {
+      transaction: {
+        to: usdc,
+        data,
+        value: "0x0",
+        chain_id: chain.id,
+        nonce,
+        gas_limit: `0x${gas.toString(16)}`,
+        max_fee_per_gas: `0x${parseGwei(String(ARC_MIN_BASE_FEE_GWEI * 2n)).toString(16)}`,
+        max_priority_fee_per_gas: "0x0",
+        type: 2,
+      },
+    },
+    authorization_context: agentAuthContext(),
+  });
+  const hash = await pub.sendRawTransaction({
+    serializedTransaction: signed.signed_transaction as `0x${string}`,
+  });
+  return { hash, mode: "sign-local" };
+}
+
+/**
+ * Over-threshold / off-allowlist path: propose a transfer intent.
+ * No authorization signature needed at proposal time — humans approve
+ * asynchronously in the Privy Dashboard (MFA), Privy executes at quorum.
+ */
+export async function proposeTransferIntent(
+  to: `0x${string}`,
+  usdcAmount: string,
+): Promise<{ intentId: string; status: string }> {
+  const privy = getPrivy();
+  const walletId = requiredEnv("PRIVY_TREASURY_WALLET_ID");
+  const intent = await privy.intents().transfer(walletId, {
+    source: { asset: "usdc", chain: chainNameForIntents() },
+    destination: { address: to },
+    amount: usdcAmount,
+  });
+  return { intentId: intent.intent_id, status: intent.status };
+}
+
+export async function getIntent(intentId: string) {
+  return getPrivy().intents().get(intentId);
+}
+
+// Privy intents take a chain slug, not CAIP-2. Verified during Day-0 spike.
+function chainNameForIntents(): string {
+  return process.env.PRIVY_INTENT_CHAIN ?? "arc-testnet";
+}
+
+/** Classify a failed Privy send so the agent can react correctly. */
+export function classifyPrivyError(err: unknown): "policy_denied" | "simulation_failed" | "unknown" {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  if (msg.includes("policy")) return "policy_denied";
+  if (msg.includes("simulat") || msg.includes("revert")) return "simulation_failed";
+  return "unknown";
+}
