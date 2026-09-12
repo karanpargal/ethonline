@@ -5,6 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb, activity, invoices, payees } from "@autocfo/shared/db";
 import { runCfoTick } from "./agent.js";
 import { getIntent } from "./privy.js";
+import { startSeller } from "./seller.js";
 
 const app = new Hono();
 app.use("*", cors());
@@ -45,3 +46,5 @@ const port = Number(process.env.AGENT_PORT ?? 3001);
 serve({ fetch: app.fetch, port }, () =>
   console.log(`AutoCFO agent API on :${port}`),
 );
+
+startSeller();
