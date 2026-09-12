@@ -78,6 +78,11 @@ export const cfoTools = {
       return {
         treasuryAddress: treasury,
         usdcBalance: baseUnitsToUsdc(balance),
+        mandate: {
+          perTxCapUsdc: process.env.PER_TX_CAP_USDC ?? "50",
+          dailyBudgetUsdc: process.env.DAILY_BUDGET_USDC ?? "200",
+          note: "Payments over the per-tx cap or to non-allowlisted payees WILL be policy-denied — escalate those via propose_approval directly instead of attempting.",
+        },
         note: "USDC is native gas on Arc; this ERC-20 balance IS the full treasury balance (single representation).",
       };
     },

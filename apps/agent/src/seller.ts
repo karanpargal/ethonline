@@ -18,6 +18,11 @@ export function startSeller() {
   const gateway = createGatewayMiddleware({
     sellerAddress: sellerAddress as `0x${string}`,
     networks: ["eip155:5042002"],
+    // Defaults to the MAINNET facilitator — must point at testnet explicitly.
+    facilitatorUrl:
+      process.env.CIRCLE_GATEWAY_FACILITATOR ??
+      "https://gateway-api-testnet.circle.com",
+    description: "MarketFeed market brief (demo x402 service)",
   });
 
   app.get("/api/market-brief", gateway.require("$0.001"), (_req, res) => {

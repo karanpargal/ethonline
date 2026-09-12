@@ -150,9 +150,13 @@ function chainNameForIntents(): string {
 }
 
 /** Classify a failed Privy send so the agent can react correctly. */
-export function classifyPrivyError(err: unknown): "policy_denied" | "simulation_failed" | "unknown" {
+export function classifyPrivyError(
+  err: unknown,
+): "policy_denied" | "insufficient_funds" | "simulation_failed" | "unknown" {
   const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
   if (msg.includes("policy")) return "policy_denied";
+  if (msg.includes("exceeds balance") || msg.includes("insufficient funds"))
+    return "insufficient_funds";
   if (msg.includes("simulat") || msg.includes("revert")) return "simulation_failed";
   return "unknown";
 }
