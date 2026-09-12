@@ -1,3 +1,4 @@
+import "./env.js";
 import { randomUUID } from "node:crypto";
 import { getDb, invoices, payees } from "@autocfo/shared/db";
 import { usdcToBaseUnits } from "@autocfo/shared";

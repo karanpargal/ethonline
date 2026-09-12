@@ -18,6 +18,7 @@
  *
  * Prints every id to paste into .env.
  */
+import "../src/env.js";
 import { PrivyClient, generateP256KeyPair } from "@privy-io/node";
 
 type PolicyRule = Parameters<
@@ -95,7 +96,7 @@ async function main() {
   const mandateRule = (
     method: "eth_sendTransaction" | "eth_signTransaction",
   ): PolicyRule => ({
-    name: `USDC transfers within mandate (${method})`,
+    name: `Mandate: USDC ${method === "eth_sendTransaction" ? "send" : "sign"}`,
     method,
     action: "ALLOW" as const,
     conditions: [

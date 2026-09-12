@@ -8,6 +8,7 @@
  * Prints which mode to set as PRIVY_SEND_MODE. If BOTH fail with chain-related
  * errors, fallback B applies: move the treasury lane to base-sepolia (CHAIN env).
  */
+import "../src/env.js";
 import { sendUsdcFromTreasury, publicClient } from "../src/privy.js";
 import { explorerTxUrl, usdcToBaseUnits } from "@autocfo/shared";
 
