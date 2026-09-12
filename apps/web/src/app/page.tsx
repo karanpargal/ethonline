@@ -34,6 +34,7 @@ export default function Dashboard() {
   const [tick, setTick] = useState<TickResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [instruction, setInstruction] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -56,8 +57,9 @@ export default function Dashboard() {
     setRunning(true);
     setTick(null);
     try {
-      const result = await api.tick();
+      const result = await api.tick(instruction.trim() || undefined);
       setTick(result);
+      setInstruction("");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -80,13 +82,22 @@ export default function Dashboard() {
             Autonomous treasury · policy-guarded on Arc
           </p>
         </div>
-        <button
-          onClick={runTick}
-          disabled={running}
-          className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-2 text-sm font-medium transition"
-        >
-          {running ? "Agent working…" : "Run agent tick"}
-        </button>
+        <div className="flex items-center gap-3">
+          <input
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !running && runTick()}
+            placeholder="Optional instruction, e.g. 'buy a market brief'"
+            className="w-80 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none"
+          />
+          <button
+            onClick={runTick}
+            disabled={running}
+            className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-2 text-sm font-medium transition"
+          >
+            {running ? "Agent working…" : "Run agent tick"}
+          </button>
+        </div>
       </header>
 
       {error && (
