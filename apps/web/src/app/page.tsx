@@ -1011,9 +1011,13 @@ function PrivySignOutButton() {
 function PrivyAuthPanel({
   onLoggedIn,
   onNeedsCreate,
+  createMode = false,
 }: {
   onLoggedIn: (token: string) => Promise<void>;
   onNeedsCreate: (session: { email: string; token: string }) => void;
+  /** true when the user deliberately clicked "Create your org" — never
+   *  auto-log them back into an existing org, go straight to creation. */
+  createMode?: boolean;
 }) {
   const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
   const [checking, setChecking] = useState(false);
@@ -1027,6 +1031,12 @@ function PrivyAuthPanel({
       setChecking(true);
       try {
         const token = (await getAccessToken()) ?? "";
+        if (createMode) {
+          const email = user?.email?.address ?? "";
+          setSession({ email });
+          onNeedsCreate({ email, token });
+          return;
+        }
         try {
           const r = await api.privyLogin(token);
           await onLoggedIn(r.token);
@@ -1063,7 +1073,8 @@ function PrivyAuthPanel({
     return (
       <div className="flex items-center justify-between rounded-2xl bg-mist px-4 py-3 text-[14px]">
         <span>
-          Signed in as <strong>{session.email}</strong> — no org yet, create one below.
+          Signed in as <strong>{session.email}</strong>
+          {createMode ? " — creating a new org." : " — no org yet, create one below."}
         </span>
         <button
           onClick={() => {
@@ -1181,6 +1192,7 @@ function Onboarding({
         </label>
         {PRIVY_ENABLED && (
           <PrivyAuthPanel
+            createMode={!!onCancel}
             onLoggedIn={async (token) => {
               setToken(token);
               await onDone();

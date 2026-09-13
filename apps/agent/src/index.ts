@@ -79,16 +79,7 @@ app.post("/orgs", async (c) => {
     return c.json({ error: "invalid Privy session — sign in again" }, 401);
   }
   if (privyUserId) {
-    const existing = getDb()
-      .select()
-      .from(orgsTable)
-      .where(eq(orgsTable.privyUserId, privyUserId))
-      .get();
-    if (existing)
-      return c.json(
-        { error: `you already have an org (${existing.name}) — use "Sign in with Privy"` },
-        409,
-      );
+    // One Privy account may own several orgs; login returns the newest.
     email = (await privyUserEmail(privyUserId)) ?? email;
   }
   if (!email) return c.json({ error: "email required" }, 400);
@@ -140,6 +131,7 @@ app.post("/orgs/login", async (c) => {
     .select()
     .from(orgsTable)
     .where(eq(orgsTable.privyUserId, privyUserId))
+    .orderBy(desc(orgsTable.createdAt))
     .get();
   if (!row) return c.json({ error: "no org for this account — create one first" }, 404);
   const token = newToken();
