@@ -25,6 +25,29 @@ import { and } from "drizzle-orm";
 import { currentOrg } from "./org.js";
 import { checkDailyBudget, recordOutflow, spentTodayBaseUnits } from "./spend.js";
 
+/**
+ * Deterministic duplicate guard: another invoice for the same payee and amount,
+ * paid/pending/queued within the last 3 days. Duplicate detection is enforced
+ * HERE, not in the prompt — the model only sees pending invoices and cannot
+ * reliably spot a bill that was already paid.
+ */
+function findLikelyDuplicate(inv: typeof invoices.$inferSelect) {
+  const since = new Date(Date.now() - 3 * 86_400_000);
+  return getDb()
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.orgId, currentOrg().orgId), eq(invoices.payeeId, inv.payeeId)))
+    .all()
+    .find(
+      (other) =>
+        other.id !== inv.id &&
+        other.amountBaseUnits === inv.amountBaseUnits &&
+        other.status !== "rejected" &&
+        other.status !== "flagged" &&
+        other.createdAt >= since,
+    );
+}
+
 // Maps our payee preferred-chain slugs to Gateway chain names.
 const GATEWAY_CHAINS: Record<string, "arcTestnet" | "baseSepolia"> = {
   "arc-testnet": "arcTestnet",
@@ -98,9 +121,15 @@ export const cfoTools = {
 
   pay_invoice: tool({
     description:
-      "Pay a pending invoice from the treasury. Privy's policy engine enforces the mandate (payee allowlist, per-tx cap, rolling daily budget) at signing time — if the policy denies, this returns denied:true and you should escalate with propose_approval instead.",
-    inputSchema: z.object({ invoiceId: z.string() }),
-    execute: async ({ invoiceId }) => {
+      "Pay a pending invoice from the treasury. Privy's policy engine enforces the mandate (payee allowlist, per-tx cap, rolling daily budget) at signing time — if the policy denies, this returns denied:true and you should escalate with propose_approval instead. Suspected duplicates (same payee + amount within 3 days) are blocked in code: flag them with flag_anomaly, or pass duplicateOverride:true ONLY after the human explicitly confirms in this conversation that both bills are legitimate.",
+    inputSchema: z.object({
+      invoiceId: z.string(),
+      duplicateOverride: z
+        .boolean()
+        .default(false)
+        .describe("true ONLY if the human explicitly confirmed the repeat charge is legitimate"),
+    }),
+    execute: async ({ invoiceId, duplicateOverride }) => {
       const db = getDb();
       const inv = db
         .select()
@@ -111,6 +140,20 @@ export const cfoTools = {
       if (inv.status !== "pending") return { error: `invoice is ${inv.status}` };
       const payee = db.select().from(payees).where(eq(payees.id, inv.payeeId)).get();
       if (!payee) return { error: "payee not found" };
+      const dup = findLikelyDuplicate(inv);
+      if (dup && !duplicateOverride) {
+        logActivity({
+          kind: "anomaly_flagged",
+          summary: `Blocked likely duplicate: ${baseUnitsToUsdc(BigInt(inv.amountBaseUnits))} USDC to ${payee.name} matches ${dup.id} (${dup.status})`,
+          detail: { signal: "duplicate_guard", matchedInvoice: dup.id, matchedStatus: dup.status },
+          invoiceId,
+        });
+        return {
+          blocked: "duplicate_suspected",
+          matchedInvoice: { id: dup.id, status: dup.status, memo: dup.memo },
+          hint: "Tell the human an identical recent bill exists. Flag this invoice with flag_anomaly, or retry with duplicateOverride:true only if they explicitly confirm it's a legitimate repeat charge.",
+        };
+      }
       // Payout address comes from ENSv2 when the payee has a name — resolved
       // live through the Universal Resolver on Sepolia, never from our DB.
       let payTo = payee.address as `0x${string}`;
@@ -302,6 +345,20 @@ export const cfoTools = {
       if (!payee) return { error: "payee not found" };
       const chain = GATEWAY_CHAINS[payee.preferredChain];
       if (!chain) return { error: `unsupported payout chain ${payee.preferredChain}` };
+      const dup = findLikelyDuplicate(inv);
+      if (dup) {
+        logActivity({
+          kind: "anomaly_flagged",
+          summary: `Blocked likely duplicate cross-chain payout: ${baseUnitsToUsdc(BigInt(inv.amountBaseUnits))} USDC to ${payee.name} matches ${dup.id} (${dup.status})`,
+          detail: { signal: "duplicate_guard", matchedInvoice: dup.id, matchedStatus: dup.status },
+          invoiceId,
+        });
+        return {
+          blocked: "duplicate_suspected",
+          matchedInvoice: { id: dup.id, status: dup.status, memo: dup.memo },
+          hint: "An identical recent bill exists — flag this invoice or ask the human to confirm before paying.",
+        };
+      }
       const amount = baseUnitsToUsdc(BigInt(inv.amountBaseUnits));
       const budgetDenial = checkDailyBudget(BigInt(inv.amountBaseUnits));
       if (budgetDenial) return { denied: true, reason: "daily_budget", hint: budgetDenial };
