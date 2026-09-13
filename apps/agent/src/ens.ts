@@ -42,6 +42,9 @@ export const REGISTRY_ABI = parseAbi([
   "function findOwner(string label) view returns (address)",
   "function getResolver(string label) view returns (address)",
   "function findExpiry(string label) view returns (uint64)",
+  "function findTokenId(string label) view returns (uint256)",
+  "function setSubregistry(uint256 anyId, address subregistry)",
+  "function getSubregistry(string label) view returns (address)",
 ]);
 
 export const REGISTRAR_ABI = parseAbi([

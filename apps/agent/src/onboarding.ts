@@ -287,6 +287,25 @@ async function provisionOrgEns(
     );
   } else if (existingOwner.toLowerCase() !== me.toLowerCase()) {
     throw new Error(`label ${slug} already owned by ${existingOwner}`);
+  } else {
+    // Label left over from a previous deployment/wipe: rewire it to the NEW
+    // org subregistry, otherwise payees would register in one registry while
+    // resolution walks the stale one.
+    const tokenId = await pub.readContract({
+      address: rootRegistry,
+      abi: REGISTRY_ABI,
+      functionName: "findTokenId",
+      args: [slug],
+    });
+    await send(
+      rootRegistry,
+      encodeFunctionData({
+        abi: REGISTRY_ABI,
+        functionName: "setSubregistry",
+        args: [tokenId, orgRegistry],
+      }),
+    );
+    console.log(`[ens:${slug}] reused existing label, rewired subregistry → ${orgRegistry}`);
   }
 
   // Org name resolves to its treasury
