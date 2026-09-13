@@ -1,0 +1,11 @@
+# Railway config for the agent service.
+# 1. New project → Deploy from GitHub repo (this repo)
+# 2. Attach a volume, mount path: /data
+# 3. Set the variables listed in README "Deploy" (or fly.toml's comment block)
+[build]
+builder = "dockerfile"
+dockerfilePath = "apps/agent/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+restartPolicyType = "on_failure"
