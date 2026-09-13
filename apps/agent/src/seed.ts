@@ -61,6 +61,12 @@ db.insert(payees)
   ])
   .run();
 
+// --no-invoices: seed payees only (blank ledger — create bills in the UI).
+if (process.argv.includes("--no-invoices")) {
+  console.log("Seeded 3 payees, no invoices (blank ledger for a live demo).");
+  process.exit(0);
+}
+
 db.insert(invoices)
   .values([
     {
