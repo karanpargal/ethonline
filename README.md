@@ -1,4 +1,4 @@
-# AutoCFO
+# AutoCFO 
 
 **An autonomous CFO for any organization — with a mandate enforced by cryptography, not prompts.**
 Built for ETHOnline 2026.
