@@ -35,6 +35,24 @@ function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
+// Agent replies use light markdown; render **bold** and `code`, nothing more.
+function Rich({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.startsWith("**") && p.endsWith("**") ? (
+          <strong key={i}>{p.slice(2, -2)}</strong>
+        ) : p.startsWith("`") && p.endsWith("`") ? (
+          <code key={i} className="font-ledger text-[0.9em]">{p.slice(1, -1)}</code>
+        ) : (
+          p
+        ),
+      )}
+    </>
+  );
+}
+
 export default function Dashboard() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
@@ -133,6 +151,7 @@ export default function Dashboard() {
           sub={
             treasury?.treasury ? shortAddr(treasury.treasury.address) : "not configured"
           }
+          copy={treasury?.treasury?.address}
         />
         <Stat
           label="Petty cash · Gateway"
@@ -144,6 +163,7 @@ export default function Dashboard() {
           sub={
             treasury?.pettyCash ? shortAddr(treasury.pettyCash.address) : "not configured"
           }
+          copy={treasury?.pettyCash?.address}
         />
         <Stat
           label="Pending outflow"
@@ -254,7 +274,7 @@ export default function Dashboard() {
             <div className="mt-8 border-l-2 border-brass bg-field-raised p-5">
               <div className="micro-label">Memo from the CFO agent</div>
               <p className="mt-2 whitespace-pre-wrap font-display text-[15px] leading-relaxed">
-                {tick.summary}
+                <Rich text={tick.summary} />
               </p>
               {tick.steps.length > 0 && (
                 <div className="font-ledger mt-3 text-[11px] text-ink-faint">
@@ -391,7 +411,9 @@ function Chat({ onActed }: { onActed: () => Promise<void> }) {
             </div>
           ) : (
             <div key={i} className="max-w-[92%] border-l-2 border-brass pl-3">
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{m.text}</p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                <Rich text={m.text} />
+              </p>
               {m.tools && m.tools.length > 0 && (
                 <p className="font-ledger mt-1 text-[11px] text-ink-faint">
                   {m.tools.join(" → ")}
@@ -542,11 +564,13 @@ function Stat({
   value,
   sub,
   accent,
+  copy,
 }: {
   label: string;
   value: string;
   sub?: string;
   accent?: boolean;
+  copy?: string;
 }) {
   return (
     <div className="bg-field p-4">
@@ -556,7 +580,34 @@ function Stat({
       >
         {value}
       </div>
-      {sub && <div className="font-ledger mt-0.5 text-[11px] text-ink-faint">{sub}</div>}
+      {sub && (
+        <div className="font-ledger mt-0.5 flex items-center gap-1.5 text-[11px] text-ink-faint">
+          {sub}
+          {copy && <CopyButton text={copy} />}
+        </div>
+      )}
     </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      title={`Copy ${text}`}
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className={`transition ${copied ? "text-paid" : "text-ink-faint hover:text-ink"}`}
+    >
+      {copied ? "✓" : (
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="5.5" y="5.5" width="9" height="9" rx="1" />
+          <path d="M10.5 5.5V2.5a1 1 0 0 0-1-1h-7a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h3" />
+        </svg>
+      )}
+    </button>
   );
 }
