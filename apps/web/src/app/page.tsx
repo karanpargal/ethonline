@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  clearToken,
   formatUsdc,
+  getToken,
   setToken,
   UnauthorizedError,
   type ActivityRow,
@@ -63,6 +65,7 @@ export default function Dashboard() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [orgName, setOrgName] = useState<string | null>(null);
   const [approving, setApproving] = useState<string | null>(null);
 
@@ -126,8 +129,17 @@ export default function Dashboard() {
     }
   };
 
-  if (needsOnboarding) {
-    return <Onboarding onDone={refresh} />;
+  if (needsOnboarding || showOnboarding) {
+    return (
+      <Onboarding
+        onDone={async () => {
+          setShowOnboarding(false);
+          setOrgName(null);
+          await refresh();
+        }}
+        onCancel={needsOnboarding ? undefined : () => setShowOnboarding(false)}
+      />
+    );
   }
 
   const pending = invoices.filter((i) => i.invoices.status === "pending");
@@ -145,6 +157,27 @@ export default function Dashboard() {
           <p className="micro-label mt-1">
             {orgName ? `${orgName} · ` : ""}autonomous treasury · mandate
             enforced by policy, not prompt
+            {" · "}
+            <button
+              onClick={() => setShowOnboarding(true)}
+              className="underline decoration-dotted underline-offset-2 hover:text-ink"
+            >
+              create your org
+            </button>
+            {getToken() && (
+              <>
+                {" · "}
+                <button
+                  onClick={() => {
+                    clearToken();
+                    location.reload();
+                  }}
+                  className="underline decoration-dotted underline-offset-2 hover:text-ink"
+                >
+                  sign out
+                </button>
+              </>
+            )}
           </p>
         </div>
         <button
@@ -364,7 +397,13 @@ export default function Dashboard() {
   );
 }
 
-function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
+function Onboarding({
+  onDone,
+  onCancel,
+}: {
+  onDone: () => Promise<void>;
+  onCancel?: () => void;
+}) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -444,7 +483,37 @@ function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
           mandate, a petty-cash account for x402 micropayments, and an on-chain
           ENS identity — all custodied for you.
         </p>
+        <ExistingToken onDone={onDone} />
+        {onCancel && (
+          <button onClick={onCancel} className="micro-label hover:text-ink">
+            ← back to dashboard
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
+
+function ExistingToken({ onDone }: { onDone: () => Promise<void> }) {
+  const [tok, setTok] = useState("");
+  return (
+    <div className="flex gap-2 border-t border-line pt-3">
+      <input
+        value={tok}
+        onChange={(e) => setTok(e.target.value)}
+        placeholder="Already have an access token?"
+        className="flex-1 border border-line-strong bg-field-raised px-3 py-2 text-xs placeholder:text-ink-faint focus:border-ink focus:outline-none"
+      />
+      <button
+        onClick={async () => {
+          if (!tok.trim()) return;
+          setToken(tok.trim());
+          await onDone();
+        }}
+        className="border border-line-strong px-3 py-2 text-xs hover:border-ink"
+      >
+        use
+      </button>
     </div>
   );
 }
