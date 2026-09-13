@@ -1000,6 +1000,8 @@ function Onboarding({
   const [privySession, setPrivySession] = useState<{ email: string; token: string } | null>(null);
 
   const submit = async () => {
+    if (PRIVY_ENABLED && !privySession)
+      return setErr("Sign in with Privy first — that's how we verify your email.");
     const effectiveEmail = privySession?.email ?? email.trim();
     if (!name.trim() || !effectiveEmail)
       return setErr("Enter an organization name and email.");
@@ -1087,7 +1089,7 @@ function Onboarding({
             onNeedsCreate={(session) => setPrivySession(session)}
           />
         )}
-        {!privySession && (
+        {!PRIVY_ENABLED && (
           <label className="block">
             <span className="field-label">Your email</span>
             <input
