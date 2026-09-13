@@ -297,15 +297,19 @@ export default function Dashboard() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {getToken() ? (
-                <button
-                  onClick={() => {
-                    clearToken();
-                    location.reload();
-                  }}
-                  className="btn btn-secondary"
-                >
-                  Sign out
-                </button>
+                PRIVY_ENABLED ? (
+                  <PrivySignOutButton />
+                ) : (
+                  <button
+                    onClick={() => {
+                      clearToken();
+                      location.reload();
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    Sign out
+                  </button>
+                )
               ) : (
                 <button onClick={() => setShowOnboarding(true)} className="btn btn-secondary">
                   <Icon name="plus" />
@@ -976,6 +980,31 @@ function KV({ label, value, num }: { label: string; value: React.ReactNode; num?
       <dt className="text-[14px] text-ink-muted">{label}</dt>
       <dd className={`min-w-0 text-right text-[14px] ${num ? "num font-semibold" : ""}`}>{value}</dd>
     </div>
+  );
+}
+
+// Signing out must ALSO end the Privy session — otherwise the onboarding
+// screen's auto-login sees the still-authenticated Privy user and logs
+// straight back in (infinite loop).
+function PrivySignOutButton() {
+  const { logout } = usePrivy();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await logout();
+        } finally {
+          clearToken();
+          location.reload();
+        }
+      }}
+      className="btn btn-secondary"
+    >
+      {busy ? "Signing out…" : "Sign out"}
+    </button>
   );
 }
 
