@@ -134,6 +134,23 @@ export const api = {
     memo: string;
     dueInDays: number;
   }) => post<{ id: string; created: boolean }>("/invoices", input),
+  createRecurring: (input: {
+    payeeId: string;
+    amountUsdc: string;
+    memo: string;
+    intervalDays: number;
+  }) => post<{ id: string; created: boolean }>("/recurring", input),
+  recurring: () =>
+    get<
+      {
+        id: string;
+        payeeName: string;
+        amountUsdc: string;
+        memo: string;
+        intervalDays: number;
+        nextDue: string;
+      }[]
+    >("/recurring"),
   tick: (instruction?: string) =>
     post<TickResult>("/agent/tick", instruction ? { instruction } : {}),
 };

@@ -4,12 +4,14 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { and, desc, eq } from "drizzle-orm";
 import { erc20Abi } from "viem";
+import { randomUUID } from "node:crypto";
 import {
   getDb,
   activity,
   allowlist as allowlistTable,
   invoices,
   payees,
+  recurring as recurringTable,
 } from "@autocfo/shared/db";
 import {
   baseUnitsToUsdc,
@@ -160,6 +162,64 @@ app.post("/invoices", async (c) => {
     })
     .run();
   return c.json({ id, created: true });
+});
+
+// Standing schedules (payroll/subscriptions) — materialized into invoices
+// at the start of every tick.
+app.post("/recurring", async (c) => {
+  const org = c.get("org");
+  const body = await c.req.json().catch(() => null);
+  if (!body?.payeeId || !body?.amountUsdc || !body?.memo)
+    return c.json({ error: "payeeId, amountUsdc, memo required" }, 400);
+  const db = getDb();
+  const payee = db
+    .select()
+    .from(payees)
+    .where(and(eq(payees.id, body.payeeId), eq(payees.orgId, org.orgId)))
+    .get();
+  if (!payee) return c.json({ error: "payee not found" }, 404);
+  const intervalDays = Math.max(1, Math.min(365, Number(body.intervalDays) || 30));
+  const startNow = body.startNow !== false;
+  const id = `REC-${randomUUID().slice(0, 8)}`;
+  db.insert(recurringTable)
+    .values({
+      id,
+      orgId: org.orgId,
+      payeeId: payee.id,
+      amountBaseUnits: usdcToBaseUnits(String(body.amountUsdc)).toString(),
+      memo: String(body.memo),
+      intervalDays,
+      nextDue: startNow ? new Date() : new Date(Date.now() + intervalDays * 86_400_000),
+      active: true,
+      createdAt: new Date(),
+    })
+    .run();
+  logActivity({
+    kind: "agent_note",
+    summary: `Recurring schedule created: ${body.amountUsdc} USDC to ${payee.name} every ${intervalDays} days (${body.memo})`,
+    detail: { signal: "recurring_created", scheduleId: id, via: "dashboard" },
+  });
+  return c.json({ id, created: true });
+});
+
+app.get("/recurring", (c) => {
+  const org = c.get("org");
+  const rows = getDb()
+    .select()
+    .from(recurringTable)
+    .innerJoin(payees, eq(recurringTable.payeeId, payees.id))
+    .where(and(eq(recurringTable.orgId, org.orgId), eq(recurringTable.active, true)))
+    .all();
+  return c.json(
+    rows.map((r) => ({
+      id: r.recurring.id,
+      payeeName: r.payees.name,
+      amountUsdc: baseUnitsToUsdc(BigInt(r.recurring.amountBaseUnits)),
+      memo: r.recurring.memo,
+      intervalDays: r.recurring.intervalDays,
+      nextDue: r.recurring.nextDue,
+    })),
+  );
 });
 
 app.get("/invoices", (c) => {

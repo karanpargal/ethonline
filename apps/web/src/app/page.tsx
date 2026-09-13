@@ -86,6 +86,9 @@ export default function Dashboard() {
   const [tick, setTick] = useState<TickResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recurringRows, setRecurringRows] = useState<
+    Awaited<ReturnType<typeof api.recurring>>
+  >([]);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -117,6 +120,7 @@ export default function Dashboard() {
       setInvoices(inv);
       setActivity(act);
       setTreasury(tre);
+      api.recurring().then(setRecurringRows).catch(() => {});
       setError(null);
       setNeedsOnboarding(false);
     } catch (e) {
@@ -313,7 +317,12 @@ export default function Dashboard() {
             <SectionHeader
               n="02"
               title="Ledger"
-              right={<NewInvoice onCreated={refresh} />}
+              right={
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <NewRecurring onCreated={refresh} />
+                  <NewInvoice onCreated={refresh} />
+                </div>
+              }
             />
             <table className="mt-3 w-full border-t border-ink text-sm">
               <thead>
@@ -399,6 +408,28 @@ export default function Dashboard() {
                 )}
               </tbody>
             </table>
+
+            {recurringRows.length > 0 && (
+              <div className="mt-4 border border-line bg-field-sunken px-4 py-3">
+                <div className="micro-label">Standing orders</div>
+                <ul className="mt-1.5 space-y-1 text-xs text-ink-soft">
+                  {recurringRows.map((r) => (
+                    <li key={r.id} className="flex justify-between gap-4">
+                      <span>
+                        {r.payeeName} · {r.memo}
+                      </span>
+                      <span className="font-ledger shrink-0">
+                        ${r.amountUsdc} every {r.intervalDays}d · next{" "}
+                        {new Date(r.nextDue).toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Agent memo (from Run tick) */}
             {tick && (
@@ -864,6 +895,114 @@ function Chat({ onActed }: { onActed: () => Promise<void> }) {
           send
         </button>
       </div>
+    </div>
+  );
+}
+
+function NewRecurring({ onCreated }: { onCreated: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [payees, setPayees] = useState<Payee[]>([]);
+  const [payeeId, setPayeeId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [memo, setMemo] = useState("");
+  const [intervalDays, setIntervalDays] = useState("30");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      api.payees().then((p) => {
+        setPayees(p);
+        if (p.length && !payeeId) setPayeeId(p[0].id);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const submit = async () => {
+    if (!payeeId || !amount || !memo) {
+      setErr("all fields required");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.createRecurring({
+        payeeId,
+        amountUsdc: amount,
+        memo,
+        intervalDays: Number(intervalDays),
+      });
+      setAmount("");
+      setMemo("");
+      setOpen(false);
+      await onCreated();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="micro-label border border-line-strong px-2.5 py-1 transition hover:border-ink hover:text-ink"
+      >
+        ⟳ recurring payment
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={payeeId}
+        onChange={(e) => setPayeeId(e.target.value)}
+        className="border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      >
+        {payees.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+      <input
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        placeholder="USDC"
+        className="font-ledger w-20 border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      />
+      <input
+        value={memo}
+        onChange={(e) => setMemo(e.target.value)}
+        placeholder="memo, e.g. retainer"
+        className="w-36 border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      />
+      <select
+        value={intervalDays}
+        onChange={(e) => setIntervalDays(e.target.value)}
+        className="border border-line-strong bg-field-raised px-2 py-1 text-xs focus:border-ink focus:outline-none"
+      >
+        <option value="7">weekly</option>
+        <option value="14">every 2 weeks</option>
+        <option value="30">monthly</option>
+      </select>
+      <button
+        onClick={submit}
+        disabled={busy}
+        className="border border-ink bg-ink px-2.5 py-1 text-xs text-field transition hover:bg-ink/85 disabled:opacity-40"
+      >
+        {busy ? "adding…" : "add"}
+      </button>
+      <button
+        onClick={() => setOpen(false)}
+        className="px-1 text-xs text-ink-faint hover:text-ink"
+      >
+        ✕
+      </button>
+      {err && <span className="text-xs text-alert">{err}</span>}
     </div>
   );
 }
