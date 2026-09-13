@@ -39,6 +39,28 @@ function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
+function SectionHeader({
+  n,
+  title,
+  meta,
+  right,
+}: {
+  n: string;
+  title: string;
+  meta?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mt-10 flex items-baseline justify-between first:mt-6">
+      <h2 className="font-display text-xl">
+        <span className="font-ledger mr-2 text-[13px] text-ink-faint">{n}</span>
+        {title}
+      </h2>
+      {right ?? (meta && <span className="micro-label">{meta}</span>)}
+    </div>
+  );
+}
+
 // Agent replies use light markdown; render **bold** and `code`, nothing more.
 function Rich({ text }: { text: string }) {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
@@ -149,50 +171,61 @@ export default function Dashboard() {
     .reduce((s, i) => s + BigInt(i.invoices.amountBaseUnits), 0n)
     .toString();
 
+  const freshOrg =
+    invoices.length === 0 &&
+    activity.length === 0 &&
+    (treasury?.treasury?.usdcBalance ?? "0") === "0";
+
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 pb-16">
+    <div className="mx-auto w-full max-w-7xl px-6 pb-16">
       {/* Masthead */}
-      <header className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-ink pb-4 pt-8">
-        <div>
-          <h1 className="font-display text-4xl italic tracking-tight">AutoCFO</h1>
-          <p className="micro-label mt-1">
-            {orgName ? `${orgName} · ` : ""}autonomous treasury · mandate
-            enforced by policy, not prompt
-            {" · "}
-            <button
-              onClick={() => setShowProfile(true)}
-              className="underline decoration-dotted underline-offset-2 hover:text-ink"
-            >
-              company profile
-            </button>
-            {" · "}
-            {getToken() ? (
-              <button
-                onClick={() => {
-                  clearToken();
-                  location.reload();
-                }}
-                className="underline decoration-dotted underline-offset-2 hover:text-ink"
-              >
-                sign out
-              </button>
-            ) : (
-              <button
-                onClick={() => setShowOnboarding(true)}
-                className="underline decoration-dotted underline-offset-2 hover:text-ink"
-              >
-                create your org
-              </button>
+      <header className="border-b-2 border-ink pb-4 pt-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="font-display text-4xl italic tracking-tight">AutoCFO</h1>
+            {orgName && (
+              <p className="mt-1 font-display text-lg text-ink-soft">{orgName}</p>
             )}
-          </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <nav className="micro-label flex items-center gap-3">
+              <button
+                onClick={() => setShowProfile(true)}
+                className="underline decoration-dotted underline-offset-2 hover:text-ink"
+              >
+                company profile
+              </button>
+              {getToken() ? (
+                <button
+                  onClick={() => {
+                    clearToken();
+                    location.reload();
+                  }}
+                  className="underline decoration-dotted underline-offset-2 hover:text-ink"
+                >
+                  sign out
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowOnboarding(true)}
+                  className="underline decoration-dotted underline-offset-2 hover:text-ink"
+                >
+                  create your org
+                </button>
+              )}
+            </nav>
+            <button
+              onClick={runTick}
+              disabled={running}
+              className="border border-ink bg-ink px-4 py-2 text-sm font-medium text-field transition hover:bg-ink/85 disabled:opacity-40"
+            >
+              {running ? "Working…" : "Run tick"}
+            </button>
+          </div>
         </div>
-        <button
-          onClick={runTick}
-          disabled={running}
-          className="border border-ink bg-ink px-4 py-2 text-sm font-medium text-field transition hover:bg-ink/85 disabled:opacity-40"
-        >
-          {running ? "Working…" : "Run tick"}
-        </button>
+        <p className="micro-label mt-2">
+          autonomous treasury · mandate enforced by policy, not prompt
+        </p>
       </header>
 
       {error && (
@@ -203,8 +236,9 @@ export default function Dashboard() {
 
       {showProfile && <Profile onClose={() => setShowProfile(false)} />}
 
-      {/* Balance strip */}
-      <section className="mt-6 grid grid-cols-2 gap-px border border-line bg-line md:grid-cols-4">
+      {/* 01 · Balances */}
+      <SectionHeader n="01" title="Balances" meta="USDC · Arc testnet" />
+      <section className="mt-3 grid grid-cols-2 gap-px border border-line bg-line md:grid-cols-4">
         <Stat
           label="Treasury · Arc"
           value={
@@ -240,160 +274,199 @@ export default function Dashboard() {
         />
       </section>
 
-      <main className="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px]">
-        <section>
-          {/* Ledger */}
-          <div className="flex items-baseline justify-between">
-            <h2 className="font-display text-xl">Ledger</h2>
-            <NewInvoice onCreated={refresh} />
-          </div>
-          <table className="mt-3 w-full border-t border-ink text-sm">
-            <thead>
-              <tr className="border-b border-line text-left">
-                <th className="micro-label py-2 font-normal">Payee</th>
-                <th className="micro-label py-2 text-right font-normal">Amount</th>
-                <th className="micro-label py-2 pl-6 font-normal">Due</th>
-                <th className="micro-label py-2 pl-6 text-right font-normal">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((row) => {
-                const s = STATUS_STYLES[row.invoices.status];
-                return (
-                  <tr key={row.invoices.id} className="border-b border-line align-top">
-                    <td className="py-3 pr-4">
-                      <div className="font-medium">{row.payees.name}</div>
-                      <div className="mt-0.5 text-xs text-ink-soft">
-                        {row.invoices.memo}
-                        {row.payees.ensName && (
-                          <span className="font-ledger ml-2 text-brass-ink">
-                            {row.payees.ensName}
-                          </span>
-                        )}
-                        {row.payees.preferredChain !== "arc-testnet" && (
-                          <span className="ml-2 text-brass-ink">
-                            ⇄ {row.payees.preferredChain}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="font-ledger py-3 text-right">
-                      {formatUsdc(row.invoices.amountBaseUnits)}
-                    </td>
-                    <td className="font-ledger py-3 pl-6 text-xs text-ink-soft">
-                      {new Date(row.invoices.dueDate).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </td>
-                    <td className="py-3 pl-6 text-right">
-                      {row.invoices.status === "awaiting_approval" ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <button
-                            disabled={approving === row.invoices.id}
-                            onClick={() => decide(row.invoices.id, "approve")}
-                            className="border border-paid bg-paid-bg px-2 py-0.5 text-xs text-paid transition hover:bg-paid hover:text-field disabled:opacity-40"
-                          >
-                            {approving === row.invoices.id ? "signing…" : "approve"}
-                          </button>
-                          <button
-                            disabled={approving === row.invoices.id}
-                            onClick={() => decide(row.invoices.id, "reject")}
-                            className="border border-alert bg-alert-bg px-2 py-0.5 text-xs text-alert transition hover:bg-alert hover:text-field disabled:opacity-40"
-                          >
-                            reject
-                          </button>
-                        </span>
-                      ) : row.invoices.txHash ? (
-                        <a
-                          href={`https://testnet.arcscan.app/tx/${row.invoices.txHash}`}
-                          target="_blank"
-                          className={`inline-block px-2 py-0.5 text-xs ${s.bg} ${s.ink} underline decoration-dotted underline-offset-2`}
-                        >
-                          {s.label} ↗
-                        </a>
-                      ) : (
-                        <span className={`inline-block px-2 py-0.5 text-xs ${s.bg} ${s.ink}`}>
-                          {s.label}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              {invoices.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-10 text-center text-sm text-ink-faint">
-                    Ledger empty — run the seed script.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
-          {/* Agent memo (from Run tick) */}
-          {tick && (
-            <div className="mt-8 border-l-2 border-brass bg-field-raised p-5">
-              <div className="micro-label">Memo from the CFO agent</div>
-              <p className="mt-2 whitespace-pre-wrap font-display text-[15px] leading-relaxed">
-                <Rich text={tick.summary} />
-              </p>
-              {tick.steps.length > 0 && (
-                <div className="font-ledger mt-3 text-[11px] text-ink-faint">
-                  {tick.steps
-                    .flatMap((s) => s.toolCalls.map((c) => c.tool))
-                    .join(" → ")}
-                </div>
-              )}
-            </div>
+      <main className="mt-10 grid grid-cols-1 gap-10 lg:grid-cols-[1fr_400px]">
+        <div className="min-w-0 space-y-10">
+          {/* Getting started (fresh org) */}
+          {freshOrg && (
+            <section className="border border-brass/50 bg-field-raised p-5">
+              <div className="micro-label text-brass-ink">Getting started</div>
+              <ol className="mt-3 space-y-2 text-sm">
+                <li>
+                  <span className="font-ledger text-ink-faint">1 · </span>
+                  Fund your treasury with Arc testnet USDC at{" "}
+                  <a
+                    href="https://faucet.circle.com"
+                    target="_blank"
+                    className="text-brass-ink underline decoration-dotted underline-offset-2"
+                  >
+                    faucet.circle.com ↗
+                  </a>{" "}
+                  (copy the address from the Treasury card above).
+                </li>
+                <li>
+                  <span className="font-ledger text-ink-faint">2 · </span>
+                  In chat, onboard your first payee — the agent registers their
+                  ENS identity and asks you to confirm a payment cap.
+                </li>
+                <li>
+                  <span className="font-ledger text-ink-faint">3 · </span>
+                  Add an invoice with <em>+ new invoice</em>, then{" "}
+                  <em>Run tick</em> — in-mandate bills are paid on-chain,
+                  anything over your caps comes back to you for approval.
+                </li>
+              </ol>
+            </section>
           )}
 
-          <Chat onActed={refresh} />
-        </section>
-
-        {/* Audit trail */}
-        <aside>
-          <div className="flex items-baseline justify-between">
-            <h2 className="font-display text-xl">Audit trail</h2>
-            <span className="micro-label">signal → action</span>
-          </div>
-          <ul className="mt-3 border-t border-ink">
-            {activity.map((a) => (
-              <li key={a.id} className="border-b border-line py-3">
-                <div className="flex items-start gap-2.5">
-                  <span
-                    className={`mt-1.5 block h-2 w-2 shrink-0 rounded-full ${KIND_DOTS[a.kind] ?? "bg-ink-faint"}`}
-                  />
-                  <div className="min-w-0">
-                    <p className="text-[13px] leading-snug">{a.summary}</p>
-                    <p className="font-ledger mt-1 text-[11px] text-ink-faint">
-                      {new Date(a.ts).toLocaleTimeString(undefined, {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                      {typeof a.detail.explorer === "string" && (
-                        <>
-                          {" · "}
+          {/* 02 · Ledger */}
+          <section>
+            <SectionHeader
+              n="02"
+              title="Ledger"
+              right={<NewInvoice onCreated={refresh} />}
+            />
+            <table className="mt-3 w-full border-t border-ink text-sm">
+              <thead>
+                <tr className="border-b border-line text-left">
+                  <th className="micro-label py-2 font-normal">Payee</th>
+                  <th className="micro-label py-2 text-right font-normal">Amount</th>
+                  <th className="micro-label py-2 pl-6 font-normal">Due</th>
+                  <th className="micro-label py-2 pl-6 text-right font-normal">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((row) => {
+                  const s = STATUS_STYLES[row.invoices.status];
+                  return (
+                    <tr key={row.invoices.id} className="border-b border-line align-top">
+                      <td className="py-3 pr-4">
+                        <div className="font-medium">{row.payees.name}</div>
+                        <div className="mt-0.5 text-xs text-ink-soft">
+                          {row.invoices.memo}
+                          {row.payees.ensName && (
+                            <span className="font-ledger ml-2 text-brass-ink">
+                              {row.payees.ensName}
+                            </span>
+                          )}
+                          {row.payees.preferredChain !== "arc-testnet" && (
+                            <span className="ml-2 text-brass-ink">
+                              ⇄ {row.payees.preferredChain}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="font-ledger py-3 text-right">
+                        {formatUsdc(row.invoices.amountBaseUnits)}
+                      </td>
+                      <td className="font-ledger py-3 pl-6 text-xs text-ink-soft">
+                        {new Date(row.invoices.dueDate).toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </td>
+                      <td className="py-3 pl-6 text-right">
+                        {row.invoices.status === "awaiting_approval" ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <button
+                              disabled={approving === row.invoices.id}
+                              onClick={() => decide(row.invoices.id, "approve")}
+                              className="border border-paid bg-paid-bg px-2 py-0.5 text-xs text-paid transition hover:bg-paid hover:text-field disabled:opacity-40"
+                            >
+                              {approving === row.invoices.id ? "signing…" : "approve"}
+                            </button>
+                            <button
+                              disabled={approving === row.invoices.id}
+                              onClick={() => decide(row.invoices.id, "reject")}
+                              className="border border-alert bg-alert-bg px-2 py-0.5 text-xs text-alert transition hover:bg-alert hover:text-field disabled:opacity-40"
+                            >
+                              reject
+                            </button>
+                          </span>
+                        ) : row.invoices.txHash ? (
                           <a
-                            href={a.detail.explorer}
+                            href={`https://testnet.arcscan.app/tx/${row.invoices.txHash}`}
                             target="_blank"
-                            className="text-brass-ink underline decoration-dotted underline-offset-2"
+                            className={`inline-block px-2 py-0.5 text-xs ${s.bg} ${s.ink} underline decoration-dotted underline-offset-2`}
                           >
-                            proof ↗
+                            {s.label} ↗
                           </a>
-                        </>
-                      )}
-                    </p>
+                        ) : (
+                          <span className={`inline-block px-2 py-0.5 text-xs ${s.bg} ${s.ink}`}>
+                            {s.label}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {invoices.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-10 text-center text-sm text-ink-faint">
+                      No invoices yet — add one with <em>+ new invoice</em>, or
+                      ask your CFO to set up a recurring payment.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {/* Agent memo (from Run tick) */}
+            {tick && (
+              <div className="mt-6 border-l-2 border-brass bg-field-raised p-5">
+                <div className="micro-label">Memo from the CFO agent</div>
+                <p className="mt-2 whitespace-pre-wrap font-display text-[15px] leading-relaxed">
+                  <Rich text={tick.summary} />
+                </p>
+                {tick.steps.length > 0 && (
+                  <div className="font-ledger mt-3 text-[11px] text-ink-faint">
+                    {tick.steps
+                      .flatMap((st) => st.toolCalls.map((tc) => tc.tool))
+                      .join(" → ")}
                   </div>
-                </div>
-              </li>
-            ))}
-            {activity.length === 0 && (
-              <li className="py-10 text-center text-sm text-ink-faint">
-                Nothing yet — the agent writes here as it works.
-              </li>
+                )}
+              </div>
             )}
-          </ul>
+          </section>
+
+          {/* 03 · Audit trail */}
+          <section>
+            <SectionHeader n="03" title="Audit trail" meta="signal → action → proof" />
+            <ul className="mt-3 border-t border-ink">
+              {activity.map((a) => (
+                <li key={a.id} className="border-b border-line py-3">
+                  <div className="flex items-start gap-2.5">
+                    <span
+                      className={`mt-1.5 block h-2 w-2 shrink-0 rounded-full ${KIND_DOTS[a.kind] ?? "bg-ink-faint"}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] leading-snug">{a.summary}</p>
+                      <p className="font-ledger mt-1 text-[11px] text-ink-faint">
+                        {new Date(a.ts).toLocaleTimeString(undefined, {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        {typeof a.detail.explorer === "string" && (
+                          <>
+                            {" · "}
+                            <a
+                              href={a.detail.explorer}
+                              target="_blank"
+                              className="text-brass-ink underline decoration-dotted underline-offset-2"
+                            >
+                              proof ↗
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              ))}
+              {activity.length === 0 && (
+                <li className="py-8 text-center text-sm text-ink-faint">
+                  Nothing yet — the agent writes here as it works.
+                </li>
+              )}
+            </ul>
+          </section>
+        </div>
+
+        {/* Right rail: the agent */}
+        <aside className="lg:sticky lg:top-6 lg:self-start">
+          <SectionHeader n="04" title="Your CFO" meta="asks before it grants" />
+          <div className="mt-3">
+            <Chat onActed={refresh} />
+          </div>
         </aside>
       </main>
 
@@ -730,7 +803,7 @@ function Chat({ onActed }: { onActed: () => Promise<void> }) {
   };
 
   return (
-    <div className="mt-8 border border-line bg-field-raised">
+    <div className="border border-line bg-field-raised">
       <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
         <span className="micro-label">Talk to your CFO</span>
         {msgs.length > 0 && (
@@ -739,7 +812,7 @@ function Chat({ onActed }: { onActed: () => Promise<void> }) {
           </button>
         )}
       </div>
-      <div className="max-h-96 space-y-4 overflow-y-auto px-4 py-4">
+      <div className="max-h-[34rem] min-h-56 space-y-4 overflow-y-auto px-4 py-4">
         {msgs.length === 0 && (
           <p className="text-sm text-ink-faint">
             Try: “onboard a new payee called karan with address 0x… and pay him
