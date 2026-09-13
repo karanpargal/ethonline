@@ -14,6 +14,7 @@ export interface InvoiceRow {
     id: string;
     name: string;
     address: string;
+    ensName: string | null;
     preferredChain: string;
     allowlisted: boolean;
   };

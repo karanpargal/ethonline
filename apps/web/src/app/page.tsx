@@ -20,6 +20,7 @@ const STATUS_STYLES: Record<string, { bg: string; ink: string; label: string }> 
 };
 
 const KIND_DOTS: Record<string, string> = {
+  payee_onboarded: "bg-brass",
   invoice_paid: "bg-paid",
   intent_proposed: "bg-hold",
   policy_denied: "bg-alert",
@@ -193,6 +194,11 @@ export default function Dashboard() {
                       <div className="font-medium">{row.payees.name}</div>
                       <div className="mt-0.5 text-xs text-ink-soft">
                         {row.invoices.memo}
+                        {row.payees.ensName && (
+                          <span className="font-ledger ml-2 text-brass-ink">
+                            {row.payees.ensName}
+                          </span>
+                        )}
                         {row.payees.preferredChain !== "arc-testnet" && (
                           <span className="ml-2 text-brass-ink">
                             ⇄ {row.payees.preferredChain}

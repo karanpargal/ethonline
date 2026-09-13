@@ -16,7 +16,10 @@ import {
   sendUsdcFromTreasury,
 } from "./privy.js";
 import { pettyCash, pettyCashState } from "./pettycash.js";
+import { resolvePayee } from "./ens.js";
+import { onboardPayeeOnEns } from "./ens-onboard.js";
 import { logActivity } from "./activity.js";
+import { randomUUID } from "node:crypto";
 
 // Maps our payee preferred-chain slugs to Gateway chain names.
 const GATEWAY_CHAINS: Record<string, "arcTestnet" | "baseSepolia"> = {
@@ -98,9 +101,20 @@ export const cfoTools = {
       if (inv.status !== "pending") return { error: `invoice is ${inv.status}` };
       const payee = db.select().from(payees).where(eq(payees.id, inv.payeeId)).get();
       if (!payee) return { error: "payee not found" };
+      // Payout address comes from ENSv2 when the payee has a name — resolved
+      // live through the Universal Resolver on Sepolia, never from our DB.
+      let payTo = payee.address as `0x${string}`;
+      let resolvedVia: string | null = null;
+      if (payee.ensName) {
+        const { address } = await resolvePayee(payee.ensName);
+        if (!address)
+          return { error: `ENS name ${payee.ensName} did not resolve — refusing to pay` };
+        payTo = address;
+        resolvedVia = payee.ensName;
+      }
       try {
         const { hash, mode } = await sendUsdcFromTreasury(
-          payee.address as `0x${string}`,
+          payTo,
           BigInt(inv.amountBaseUnits),
         );
         db.update(invoices)
@@ -110,7 +124,12 @@ export const cfoTools = {
         logActivity({
           kind: "invoice_paid",
           summary: `Paid ${baseUnitsToUsdc(BigInt(inv.amountBaseUnits))} USDC to ${payee.name} (${inv.memo})`,
-          detail: { signal: "invoice_due", mode, explorer: explorerTxUrl(hash) },
+          detail: {
+            signal: "invoice_due",
+            mode,
+            explorer: explorerTxUrl(hash),
+            ...(resolvedVia ? { resolvedVia, resolvedAddress: payTo } : {}),
+          },
           invoiceId,
           txHash: hash,
         });
@@ -276,6 +295,54 @@ export const cfoTools = {
         return { paid: true, chain: payee.preferredChain, txHash };
       } catch (err) {
         return { error: String(err), hint: "Gateway balance may be too low — top up petty cash." };
+      }
+    },
+  }),
+
+  onboard_payee: tool({
+    description:
+      "Onboard a new payee by giving them an on-chain identity: registers <label>.<company>.eth in the company's ENSv2 registry (Sepolia) with their payout address and preferred chain as resolver records, then saves them locally. Uses your bounded ENS key (ROLE_REGISTRAR only — you cannot modify the parent name). NOTE: paying them also requires a human to add the address to the Privy policy allowlist.",
+    inputSchema: z.object({
+      label: z
+        .string()
+        .regex(/^[a-z0-9-]{3,20}$/)
+        .describe("subname label, e.g. 'acme' → acme.autocfo.eth"),
+      displayName: z.string(),
+      payoutAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+      preferredChain: z.enum(["arc-testnet", "base-sepolia"]).default("arc-testnet"),
+    }),
+    execute: async ({ label, displayName, payoutAddress, preferredChain }) => {
+      try {
+        const { fullName, txHashes } = await onboardPayeeOnEns(
+          label,
+          payoutAddress as `0x${string}`,
+          preferredChain,
+        );
+        getDb()
+          .insert(payees)
+          .values({
+            id: `PAYEE-${randomUUID().slice(0, 8)}`,
+            name: displayName,
+            address: payoutAddress,
+            ensName: fullName,
+            preferredChain,
+            allowlisted: false,
+            createdAt: new Date(),
+          })
+          .run();
+        logActivity({
+          kind: "payee_onboarded",
+          summary: `Onboarded ${displayName} as ${fullName} (ENSv2, agent's bounded key)`,
+          detail: {
+            signal: "payee_onboarding",
+            ensName: fullName,
+            sepoliaTxs: txHashes,
+            note: "address NOT yet on the Privy allowlist — human action required",
+          },
+        });
+        return { onboarded: true, ensName: fullName, txHashes };
+      } catch (err) {
+        return { error: String(err instanceof Error ? err.message : err) };
       }
     },
   }),

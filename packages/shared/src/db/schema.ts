@@ -52,6 +52,7 @@ export const activity = sqliteTable("activity", {
       "x402_purchase",
       "petty_cash_topup",
       "cross_chain_payout",
+      "payee_onboarded",
       "agent_note",
     ],
   }).notNull(),
