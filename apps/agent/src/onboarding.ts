@@ -35,6 +35,24 @@ export interface OnboardResult {
 
 export type StepReporter = (step: string) => void;
 
+// One signer funds all ENS provisioning — concurrent signups must not race
+// nonces, so jobs take turns.
+let ensQueue: Promise<unknown> = Promise.resolve();
+function enqueueEns<T>(fn: () => Promise<T>): Promise<T> {
+  const next = ensQueue.then(fn, fn);
+  ensQueue = next.catch(() => {});
+  return next;
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms),
+    ),
+  ]);
+}
+
 function sanitizeCap(v: string | undefined, fallback: string): string {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 && n <= 1_000_000 ? String(n) : fallback;
@@ -112,16 +130,21 @@ export async function onboardOrg(
   const pettyPk = generatePrivateKey();
   const pettyAddress = privateKeyToAccount(pettyPk).address;
 
-  // 5. ENS subname + per-org subregistry (best-effort)
+  // 5. ENS subname + per-org subregistry (best-effort). Serialized through a
+  //    queue (one signer = nonce races between concurrent signups) and hard-
+  //    capped so a slow Sepolia RPC can never hang onboarding forever.
   let ensLabel: string | null = null;
   let ensRegistry: string | null = null;
   step("Minting your ENS name on Sepolia (the slow part)");
   try {
-    const provisioned = await provisionOrgEns(slug, wallet.address as Address);
+    const provisioned = await enqueueEns(() =>
+      withTimeout(provisionOrgEns(slug, wallet.address as Address), 180_000, "ENS provisioning"),
+    );
     ensLabel = provisioned.label;
     ensRegistry = provisioned.registry;
   } catch (err) {
     console.error(`ENS provisioning failed for ${slug} (continuing):`, err);
+    step("ENS mint skipped (Sepolia was slow — org continues without a name)");
   }
 
   // 6. Persist + issue the access token
@@ -181,7 +204,7 @@ async function provisionOrgEns(
 
   const send = async (to: Address, data: `0x${string}`) => {
     const hash = await owner.sendTransaction({ to, data });
-    const receipt = await pub.waitForTransactionReceipt({ hash });
+    const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 60_000 });
     if (receipt.status !== "success") throw new Error(`ens tx reverted: ${hash}`);
   };
 
@@ -213,16 +236,28 @@ async function provisionOrgEns(
     }),
   );
 
-  // Register <slug> under autocfo.eth, wired to the org subregistry
+  // Register <slug> under autocfo.eth, wired to the org subregistry.
+  // A retried signup may have registered the label in an earlier stuck run —
+  // if we already own it, skip the register instead of reverting.
   const expiry = BigInt(Math.floor(Date.now() / 1000) + 365 * 86400);
-  await send(
-    rootRegistry,
-    encodeFunctionData({
-      abi: REGISTRY_ABI,
-      functionName: "register",
-      args: [slug, me, orgRegistry, resolver, 0n, expiry],
-    }),
-  );
+  const existingOwner = await pub.readContract({
+    address: rootRegistry,
+    abi: REGISTRY_ABI,
+    functionName: "findOwner",
+    args: [slug],
+  });
+  if (existingOwner === "0x0000000000000000000000000000000000000000") {
+    await send(
+      rootRegistry,
+      encodeFunctionData({
+        abi: REGISTRY_ABI,
+        functionName: "register",
+        args: [slug, me, orgRegistry, resolver, 0n, expiry],
+      }),
+    );
+  } else if (existingOwner.toLowerCase() !== me.toLowerCase()) {
+    throw new Error(`label ${slug} already owned by ${existingOwner}`);
+  }
 
   // Org name resolves to its treasury
   const { payeeNode, RESOLVER_ABI } = await import("./ens.js");
