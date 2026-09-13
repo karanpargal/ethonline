@@ -1,70 +1,302 @@
 @import "tailwindcss";
 
-/* Paper-ledger palette: warm field, ink text, brass accent, hairline rules.
-   One deliberate light look — no dark variant. */
+/* Calm, functional palette: neutrals carry the page and colour is reserved for
+   meaning. Blue = something you can do, green = money moved, amber = waiting on
+   a person, red = refused. Slate is only the treasury card. One light look. */
 :root {
-  --field: #faf8f0;
-  --field-raised: #ffffff;
-  --field-sunken: #f3f0e4;
-  --ink: #1b1b18;
-  --ink-soft: #6b6757;
-  --ink-faint: #a39e8c;
-  --line: #e3ddc9;
-  --line-strong: #cfc8ae;
-  --brass: #c9a86a;
-  --brass-ink: #8a6c2e;
-  --paid: #0e5b54;
-  --paid-bg: #e4efe9;
-  --alert: #b3311c;
-  --alert-bg: #f8e7e0;
-  --hold: #16418c;
-  --hold-bg: #e5ecf8;
-  --flag: #8a6c2e;
-  --flag-bg: #f5ecd7;
+  --canvas: #ffffff;
+  --mist: #f3f4f6;
+  --line: #e5e7eb;
+  --line-strong: #d3d6dc;
+  --ink: #1a1d24;
+  --ink-muted: #646a78;
+  --ink-quiet: #858a95;
+  --signal: #1a7ab8;
+  --signal-press: #156699;
+  --sky: #5bb8e8;
+  --sky-wash: #e6f2fa;
+  --frost: #dcedf8;
+  --frost-line: #f7fbfe;
+  --deep: #2a3244;
+  --deep-muted: #aeb6c6;
+  --paid: #2e7d4f;
+  --paid-wash: #e7f4ec;
+  --wait: #9a5a00;
+  --wait-wash: #fcf0db;
+  --wait-line: #e8c78d;
+  --stop: #b3322b;
+  --stop-wash: #fbebea;
 }
 
 @theme inline {
-  --color-field: var(--field);
-  --color-field-raised: var(--field-raised);
-  --color-field-sunken: var(--field-sunken);
-  --color-ink: var(--ink);
-  --color-ink-soft: var(--ink-soft);
-  --color-ink-faint: var(--ink-faint);
+  --color-canvas: var(--canvas);
+  --color-mist: var(--mist);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
-  --color-brass: var(--brass);
-  --color-brass-ink: var(--brass-ink);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-quiet: var(--ink-quiet);
+  --color-signal: var(--signal);
+  --color-sky: var(--sky);
+  --color-sky-wash: var(--sky-wash);
+  --color-frost: var(--frost);
+  --color-frost-line: var(--frost-line);
+  --color-deep: var(--deep);
+  --color-deep-muted: var(--deep-muted);
   --color-paid: var(--paid);
-  --color-paid-bg: var(--paid-bg);
-  --color-alert: var(--alert);
-  --color-alert-bg: var(--alert-bg);
-  --color-hold: var(--hold);
-  --color-hold-bg: var(--hold-bg);
-  --color-flag: var(--flag);
-  --color-flag-bg: var(--flag-bg);
-  --font-display: var(--font-display);
-  --font-ui: var(--font-ui);
-  --font-ledger: var(--font-ledger);
+  --color-paid-wash: var(--paid-wash);
+  --color-wait: var(--wait);
+  --color-wait-wash: var(--wait-wash);
+  --color-stop: var(--stop);
+  --color-stop-wash: var(--stop-wash);
+  --font-sans: var(--font-onest), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
-body {
-  background: var(--field);
-  color: var(--ink);
-  font-family: var(--font-ui), system-ui, sans-serif;
+@layer base {
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-onest), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--sky);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--sky-wash);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
 }
 
-.font-display {
-  font-family: var(--font-display), Georgia, serif;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-.font-ledger {
-  font-family: var(--font-ledger), ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-}
+/* Shape encodes what a thing is. Pills with weight, an edge or a shadow are
+   pressed; flat small-radius tags only describe; 12px is typed into; large
+   radii hold content. */
+@layer components {
+  /* Every figure — balances, amounts, dates, counts — sets in the figures face
+     with tabular digits so columns line up. */
+  .num {
+    font-family: var(--font-figures), var(--font-onest), ui-sans-serif, system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
 
-.micro-label {
-  font-size: 0.65rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+
+  .link {
+    color: var(--signal);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--signal) 35%, transparent);
+    text-underline-offset: 3px;
+  }
+  .link:hover {
+    text-decoration-color: currentColor;
+  }
+
+  /* Calls to action */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.6rem 1.35rem;
+    border-radius: 9999px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    line-height: 1.2;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      background-color 0.15s,
+      color 0.15s,
+      box-shadow 0.15s,
+      transform 0.1s;
+  }
+  .btn svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .btn:not(:disabled):active {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-sm {
+    min-height: 2.25rem;
+    padding: 0.4rem 1rem;
+    font-size: 14px;
+  }
+  .btn-sm svg {
+    width: 14px;
+    height: 14px;
+  }
+  .btn-lg {
+    min-height: 3.25rem;
+    padding: 0.8rem 1.9rem;
+    font-size: 16px;
+  }
+  .btn-primary {
+    background: var(--signal);
+    color: #fff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 1px 2px rgba(16, 40, 64, 0.16),
+      0 6px 16px -6px rgba(26, 122, 184, 0.55);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: var(--signal-press);
+  }
+  .btn-primary:not(:disabled):active {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 1px 2px rgba(16, 40, 64, 0.16);
+  }
+  .btn-secondary {
+    background: var(--canvas);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1.5px var(--ink);
+  }
+  .btn-secondary:not(:disabled):hover {
+    background: color-mix(in srgb, var(--ink) 6%, var(--canvas));
+  }
+  .btn-quiet {
+    background: transparent;
+    color: var(--ink-muted);
+    font-weight: 500;
+  }
+  .btn-quiet:not(:disabled):hover {
+    color: var(--ink);
+    background: color-mix(in srgb, var(--ink) 5%, transparent);
+  }
+
+  /* Descriptions: flat, no edge, never a pill */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 1.875rem;
+    padding: 0.25rem 0.7rem 0.25rem 0.55rem;
+    border-radius: 8px;
+    background: var(--mist);
+    color: var(--ink-muted);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.3;
+    cursor: default;
+  }
+  .badge svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--ink-quiet);
+  }
+  .badge strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 6px;
+    padding: 0.15rem 0.6rem;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .chip-neutral {
+    background: var(--mist);
+    color: var(--ink-muted);
+  }
+  .chip-paid {
+    background: var(--paid-wash);
+    color: var(--paid);
+  }
+  .chip-wait {
+    background: var(--wait-wash);
+    color: var(--wait);
+  }
+  .chip-flag {
+    background: var(--canvas);
+    color: var(--wait);
+    box-shadow: inset 0 0 0 1px var(--wait-line);
+  }
+  .chip-stop {
+    background: var(--stop-wash);
+    color: var(--stop);
+  }
+
+  .field {
+    display: block;
+    width: 100%;
+    border-radius: 12px;
+    background: var(--canvas);
+    color: var(--ink);
+    padding: 0.7rem 1rem;
+    font-size: 15px;
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+    transition: box-shadow 0.15s;
+  }
+  .field::placeholder {
+    color: var(--ink-quiet);
+  }
+  .field:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--sky);
+  }
+  .field:disabled {
+    opacity: 0.5;
+  }
+  .field-sm {
+    width: auto;
+    padding: 0.4rem 0.75rem;
+    font-size: 13px;
+    border-radius: 10px;
+  }
+  select.field {
+    appearance: none;
+    padding-right: 2rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23646a78' stroke-width='1.5'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.8rem center;
+  }
+  .field-label {
+    display: block;
+    font-size: 13px;
+    color: var(--ink-muted);
+  }
+
+  .footer-link {
+    color: var(--ink);
+    text-underline-offset: 4px;
+  }
+  .footer-link:hover {
+    text-decoration: underline;
+  }
 }

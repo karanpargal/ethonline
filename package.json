@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "AutoCFO — an autonomous CFO agent with a policy-guarded treasury on Arc (ETHOnline 2026)",
   "scripts": {
-    "dev": "pnpm --parallel --filter ./apps/* dev",
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "db:push": "pnpm --filter @autocfo/shared db:push"
