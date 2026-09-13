@@ -158,25 +158,23 @@ export default function Dashboard() {
             {orgName ? `${orgName} · ` : ""}autonomous treasury · mandate
             enforced by policy, not prompt
             {" · "}
-            <button
-              onClick={() => setShowOnboarding(true)}
-              className="underline decoration-dotted underline-offset-2 hover:text-ink"
-            >
-              create your org
-            </button>
-            {getToken() && (
-              <>
-                {" · "}
-                <button
-                  onClick={() => {
-                    clearToken();
-                    location.reload();
-                  }}
-                  className="underline decoration-dotted underline-offset-2 hover:text-ink"
-                >
-                  sign out
-                </button>
-              </>
+            {getToken() ? (
+              <button
+                onClick={() => {
+                  clearToken();
+                  location.reload();
+                }}
+                className="underline decoration-dotted underline-offset-2 hover:text-ink"
+              >
+                sign out
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowOnboarding(true)}
+                className="underline decoration-dotted underline-offset-2 hover:text-ink"
+              >
+                create your org
+              </button>
             )}
           </p>
         </div>
