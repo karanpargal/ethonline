@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
 
 // Tenants. AutoCFO custodies everything per org: Privy org/wallet/policy and
 // both authorization keys, a petty-cash EOA, and an ENSv2 subname registry.
@@ -83,13 +83,19 @@ export const invoices = sqliteTable("invoices", {
 // The payment-authority list mirrored into the Privy policy: each row becomes
 // an ALLOW rule (recipient == address AND amount <= cap). Additions happen only
 // after explicit human confirmation in chat; the sync signs with the admin key.
-export const allowlist = sqliteTable("allowlist", {
-  address: text("address").primaryKey(),
-  orgId: text("org_id").notNull().default("env"),
-  label: text("label").notNull(),
-  capBaseUnits: text("cap_base_units").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
+export const allowlist = sqliteTable(
+  "allowlist",
+  {
+    address: text("address").notNull(),
+    orgId: text("org_id").notNull().default("env"),
+    label: text("label").notNull(),
+    capBaseUnits: text("cap_base_units").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  // The same payee address may hold authority in several orgs — identity is
+  // per-tenant, so the key is (org, address), not the address alone.
+  (t) => [primaryKey({ columns: [t.orgId, t.address] })],
+);
 
 // Standing payment schedules (payroll, subscriptions). Each tick, schedules
 // past nextDue are materialized into normal pending invoices by code (not the
