@@ -363,7 +363,7 @@ export default function Dashboard() {
           aria-label="Balances"
           className="mt-10 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]"
         >
-          <TreasuryCard treasury={treasury} />
+          <TreasuryCard treasury={treasury} onChanged={refresh} />
           <div className="grid grid-cols-1 divide-y divide-line rounded-3xl bg-mist p-2 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <Figure
               label="Petty cash"
@@ -700,14 +700,84 @@ function SiteFooter({
   );
 }
 
-function TreasuryCard({ treasury }: { treasury: TreasuryState | null }) {
+function TreasuryCard({
+  treasury,
+  onChanged,
+}: {
+  treasury: TreasuryState | null;
+  onChanged: () => Promise<void>;
+}) {
   const t = treasury?.treasury;
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const withdraw = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.withdraw(to.trim(), amount.trim());
+      setOpen(false);
+      setTo("");
+      setAmount("");
+      await onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex min-h-48 flex-col justify-between gap-8 rounded-3xl bg-deep p-6 text-white md:p-7">
       <div className="flex items-start justify-between gap-4 text-[14px] text-deep-muted">
         <span>Treasury on Arc</span>
-        <span>USDC</span>
+        {t ? (
+          <button
+            onClick={() => {
+              setOpen(!open);
+              setErr(null);
+            }}
+            className="rounded-full bg-white/10 px-3 py-1 text-[13px] font-medium text-white transition hover:bg-white/20"
+          >
+            {open ? "Cancel" : "Withdraw"}
+          </button>
+        ) : (
+          <span>USDC</span>
+        )}
       </div>
+      {open && (
+        <div className="space-y-2.5">
+          <input
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="Recipient address (0x…)"
+            className="mono w-full rounded-xl bg-white/10 px-3.5 py-2.5 text-[13px] text-white placeholder:text-deep-muted focus:outline-none focus:ring-2 focus:ring-white/40"
+          />
+          <div className="flex gap-2.5">
+            <input
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              inputMode="decimal"
+              placeholder="Amount (USDC)"
+              className="num w-full flex-1 rounded-xl bg-white/10 px-3.5 py-2.5 text-[13px] text-white placeholder:text-deep-muted focus:outline-none focus:ring-2 focus:ring-white/40"
+            />
+            <button
+              onClick={withdraw}
+              disabled={busy || !to.trim() || !amount.trim()}
+              className="rounded-xl bg-white px-4 py-2 text-[13px] font-semibold text-deep transition hover:bg-white/90 disabled:opacity-40"
+            >
+              {busy ? "Signing…" : "Send"}
+            </button>
+          </div>
+          {err && <p className="text-[13px] text-[#ffb4ad]">{err}</p>}
+          <p className="text-[12px] leading-relaxed text-deep-muted">
+            Signed with your owner key — the agent can't do this.
+          </p>
+        </div>
+      )}
       <div>
         <div className="num text-[44px] font-bold leading-none tracking-[-0.03em] md:text-[56px]">
           {t ? <Money value={t.usdcBalance} /> : <span className="font-light text-deep-muted">—</span>}

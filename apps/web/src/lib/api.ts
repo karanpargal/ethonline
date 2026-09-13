@@ -195,6 +195,11 @@ export const api = {
         nextDue: string;
       }[]
     >("/recurring"),
+  withdraw: (to: string, amountUsdc: string) =>
+    post<{ withdrawn: boolean; txHash: string; explorer: string }>("/treasury/withdraw", {
+      to,
+      amountUsdc,
+    }),
   tick: (instruction?: string) =>
     post<TickResult>("/agent/tick", instruction ? { instruction } : {}),
 };

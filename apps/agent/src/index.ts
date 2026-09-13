@@ -391,6 +391,29 @@ app.post("/invoices/:id/reject", async (c) => {
   return c.json({ rejected: true });
 });
 
+// Owner withdrawal: moves USDC out of the treasury to any address, signed with
+// the OWNER quorum key (explicit human action — not the agent, no policy/budget).
+app.post("/treasury/withdraw", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const to = String(body?.to ?? "");
+  const amountUsdc = String(body?.amountUsdc ?? "");
+  if (!/^0x[a-fA-F0-9]{40}$/.test(to)) return c.json({ error: "invalid address" }, 400);
+  const units = usdcToBaseUnits(amountUsdc);
+  if (units <= 0n) return c.json({ error: "invalid amount" }, 400);
+  try {
+    const { hash } = await sendUsdcFromTreasury(to as `0x${string}`, units, "owner");
+    logActivity({
+      kind: "withdrawal",
+      summary: `Owner withdrew ${amountUsdc} USDC to ${to.slice(0, 8)}…${to.slice(-6)}`,
+      detail: { signal: "owner_withdrawal", to, explorer: explorerTxUrl(hash) },
+      txHash: hash,
+    });
+    return c.json({ withdrawn: true, txHash: hash, explorer: explorerTxUrl(hash) });
+  } catch (err) {
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 500);
+  }
+});
+
 // Balance card data. Each lane resolves independently and tolerates missing
 // config (pre-funding) by returning null for that lane.
 app.get("/treasury", async (c) => {

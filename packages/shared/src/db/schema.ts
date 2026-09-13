@@ -123,6 +123,7 @@ export const activity = sqliteTable("activity", {
       "petty_cash_topup",
       "cross_chain_payout",
       "payee_onboarded",
+      "withdrawal",
       "agent_note",
     ],
   }).notNull(),
