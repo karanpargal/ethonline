@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { erc20Abi } from "viem";
-import { getDb, invoices, payees } from "@autocfo/shared/db";
+import { getDb, invoices, payees, recurring } from "@autocfo/shared/db";
 import {
   baseUnitsToUsdc,
   explorerTxUrl,
@@ -296,6 +296,52 @@ export const cfoTools = {
       } catch (err) {
         return { error: String(err), hint: "Gateway balance may be too low — top up petty cash." };
       }
+    },
+  }),
+
+  create_recurring_payment: tool({
+    description:
+      "Set up a standing payment schedule (payroll, subscription): every interval, an invoice is generated automatically and flows through the normal mandate — within-cap payments auto-pay, over-cap ones escalate for human approval. The payee must already exist (onboard_payee first if not).",
+    inputSchema: z.object({
+      payeeId: z.string().describe("existing payee id (from list_invoices or after onboard_payee)"),
+      amountUsdc: z.string().describe("amount per payment, e.g. '1000'"),
+      memo: z.string().describe("e.g. 'Monthly retainer'"),
+      intervalDays: z.number().int().min(1).max(365).default(30),
+      startNow: z
+        .boolean()
+        .default(true)
+        .describe("true: first invoice is due immediately; false: first due after one interval"),
+    }),
+    execute: async ({ payeeId, amountUsdc, memo, intervalDays, startNow }) => {
+      const db = getDb();
+      const payee = db.select().from(payees).where(eq(payees.id, payeeId)).get();
+      if (!payee) return { error: `payee ${payeeId} not found — onboard them first` };
+      const nextDue = startNow
+        ? new Date()
+        : new Date(Date.now() + intervalDays * 86_400_000);
+      const id = `REC-${randomUUID().slice(0, 8)}`;
+      db.insert(recurring)
+        .values({
+          id,
+          payeeId,
+          amountBaseUnits: usdcToBaseUnits(amountUsdc).toString(),
+          memo,
+          intervalDays,
+          nextDue,
+          active: true,
+          createdAt: new Date(),
+        })
+        .run();
+      logActivity({
+        kind: "agent_note",
+        summary: `Created recurring schedule: ${amountUsdc} USDC to ${payee.name} every ${intervalDays} days (${memo})`,
+        detail: { signal: "recurring_created", scheduleId: id },
+      });
+      const capNote =
+        usdcToBaseUnits(amountUsdc) > usdcToBaseUnits(process.env.PER_TX_CAP_USDC ?? "10")
+          ? "NOTE: amount exceeds the per-tx mandate cap — every generated invoice will require human approval."
+          : undefined;
+      return { scheduleId: id, nextDue: nextDue.toISOString(), capNote };
     },
   }),
 

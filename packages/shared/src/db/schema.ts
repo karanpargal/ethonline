@@ -39,6 +39,22 @@ export const invoices = sqliteTable("invoices", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// Standing payment schedules (payroll, subscriptions). Each tick, schedules
+// past nextDue are materialized into normal pending invoices by code (not the
+// LLM), so recurring payments flow through the same mandate/escalation path.
+export const recurring = sqliteTable("recurring", {
+  id: text("id").primaryKey(),
+  payeeId: text("payee_id")
+    .notNull()
+    .references(() => payees.id),
+  amountBaseUnits: text("amount_base_units").notNull(),
+  memo: text("memo").notNull(),
+  intervalDays: integer("interval_days").notNull(),
+  nextDue: integer("next_due", { mode: "timestamp" }).notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
 // Audit trail: every agent decision links signal → decision → policy result → tx.
 export const activity = sqliteTable("activity", {
   id: text("id").primaryKey(),
