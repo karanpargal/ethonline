@@ -299,7 +299,42 @@ export const cfoTools = {
           summary: `Petty-cash top-up of ${amountUsdc} USDC blocked (${reason})`,
           detail: { signal: "petty_cash_low", reason, error: String(err) },
         });
-        return { denied: true, reason };
+        return {
+          denied: true,
+          reason,
+          hint:
+            reason === "policy_denied"
+              ? `The petty-cash wallet (${client.address}) is not on this org's payment allowlist. Ask the human to confirm granting it authority, then call grant_payment_authority for that address and retry. Alternatively, if the petty-cash WALLET already holds USDC, use deposit_petty_cash instead.`
+              : undefined,
+        };
+      }
+    },
+  }),
+
+  deposit_petty_cash: tool({
+    description:
+      "Deposit USDC that is ALREADY in the petty-cash wallet into Circle Gateway so it becomes spendable for x402 purchases and cross-chain payouts. No treasury or policy involved — same account, different bucket. Use when the wallet balance is funded (e.g. from a faucet) but the Gateway balance is low.",
+    inputSchema: z.object({
+      amountUsdc: z.string().describe("Decimal USDC amount, e.g. '2'"),
+    }),
+    execute: async ({ amountUsdc }) => {
+      try {
+        const client = pettyCash();
+        const dep = await client.deposit(amountUsdc);
+        logActivity({
+          kind: "petty_cash_topup",
+          summary: `Deposited ${amountUsdc} USDC from the petty-cash wallet into Gateway`,
+          detail: {
+            signal: "gateway_deposit",
+            depositTx: String((dep as { depositTxHash?: string }).depositTxHash ?? ""),
+          },
+        });
+        return { deposited: true, amountUsdc };
+      } catch (err) {
+        return {
+          error: String(err instanceof Error ? err.message : err),
+          hint: "The petty-cash WALLET may be empty — fund it at faucet.circle.com or top up from the treasury.",
+        };
       }
     },
   }),

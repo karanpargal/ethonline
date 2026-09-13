@@ -8,7 +8,8 @@ import { eq } from "drizzle-orm";
 import { PrivyClient, generateP256KeyPair } from "@privy-io/node";
 import { encodeFunctionData, type Address } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { getDb, orgs } from "@autocfo/shared/db";
+import { allowlist, getDb, orgs } from "@autocfo/shared/db";
+import { usdcToBaseUnits } from "@autocfo/shared";
 import {
   ADMIN,
   ENS,
@@ -23,7 +24,8 @@ import {
   ensWallet,
 } from "./ens.js";
 import { getPrivy, requiredEnv } from "./privy.js";
-import { hashToken, newToken } from "./org.js";
+import { hashToken, newToken, orgFromRow, runWithOrg } from "./org.js";
+import { syncPolicyFromAllowlist } from "./policy.js";
 
 export interface OnboardResult {
   orgId: string;
@@ -177,6 +179,25 @@ export async function onboardOrg(
       createdAt: new Date(),
     })
     .run();
+
+  // 7. The org's own petty-cash wallet is always payment-authorized (it's
+  //    internal money movement — top-ups must not need a human grant).
+  step("Authorizing the petty-cash lane");
+  try {
+    db.insert(allowlist)
+      .values({
+        address: pettyAddress,
+        orgId: slug,
+        label: "Petty cash wallet",
+        capBaseUnits: usdcToBaseUnits(sanitizeCap(caps?.perTxCapUsdc, "10")).toString(),
+        createdAt: new Date(),
+      })
+      .run();
+    const row = db.select().from(orgs).where(eq(orgs.id, slug)).get();
+    if (row) await runWithOrg(orgFromRow(row), () => syncPolicyFromAllowlist());
+  } catch (err) {
+    console.error(`[onboard:${name}] petty-cash authorization failed (grant it in chat):`, err);
+  }
 
   console.log(
     `[onboard:${name}] complete org=${slug} treasury=${wallet.address} ens=${ensLabel ?? "none"}`,
