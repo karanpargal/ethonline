@@ -1,0 +1,29 @@
+# Fly.io config for the agent service. Deploy from the repo root:
+#   fly launch --no-deploy   (once, accepts this file)
+#   fly volumes create autocfo_data --size 1
+#   fly secrets set PRIVY_APP_ID=... PRIVY_APP_SECRET=... OPENAI_API_KEY=... \
+#     AI_PROVIDER=openai AI_MODEL=... PRIVY_SEND_MODE=sign-local \
+#     PETTY_CASH_PRIVATE_KEY=... ENS_AGENT_PRIVATE_KEY=... ENS_AGENT_ADDRESS=... \
+#     ENS_USER_REGISTRY=... ENS_RESOLVER=... ENS_COMPANY_LABEL=autocfo \
+#     SELLER_ADDRESS=... PER_TX_CAP_USDC=10
+#   fly deploy
+app = "autocfo-agent"
+primary_region = "sin"
+
+[build]
+  dockerfile = "apps/agent/Dockerfile"
+
+[env]
+  PORT = "3001"
+  ALLOW_ENV_ORG = "false"
+  DATABASE_PATH = "/data/autocfo.db"
+
+[[mounts]]
+  source = "autocfo_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = false
+  min_machines_running = 1

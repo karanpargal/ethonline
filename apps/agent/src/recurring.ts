@@ -3,6 +3,7 @@ import { and, eq, lte } from "drizzle-orm";
 import { getDb, invoices, payees, recurring } from "@autocfo/shared/db";
 import { baseUnitsToUsdc } from "@autocfo/shared";
 import { logActivity } from "./activity.js";
+import { currentOrg } from "./org.js";
 
 /**
  * Materializes due schedules into pending invoices. Deterministic code, run at
@@ -13,13 +14,14 @@ export function materializeRecurring(): number {
   const due = db
     .select()
     .from(recurring)
-    .where(and(eq(recurring.active, true), lte(recurring.nextDue, new Date())))
+    .where(and(eq(recurring.active, true), eq(recurring.orgId, currentOrg().orgId), lte(recurring.nextDue, new Date())))
     .all();
   for (const r of due) {
     const payee = db.select().from(payees).where(eq(payees.id, r.payeeId)).get();
     db.insert(invoices)
       .values({
         id: `INV-${randomUUID().slice(0, 8)}`,
+        orgId: currentOrg().orgId,
         payeeId: r.payeeId,
         amountBaseUnits: r.amountBaseUnits,
         memo: `${r.memo} (recurring)`,

@@ -43,6 +43,32 @@ pnpm --filter @autocfo/agent seed             # demo payees + invoices
 pnpm dev                                      # web on :3000, agent on :3001
 ```
 
+## Multi-tenant onboarding
+
+Anyone can spin up an AutoCFO org from the app: `POST /orgs {name, email}` (or
+the web onboarding screen) provisions in ~1 minute:
+
+- a Privy **organization wallet** with a TEE-enforced mandate policy and the
+  agent attached as a bounded signer (we custody both authorization keys)
+- a dedicated **petty-cash EOA** for gasless x402 micropayments via Gateway
+- an **ENSv2 identity**: `<org>.autocfo.eth` with its own subregistry, so
+  payees become `<payee>.<org>.autocfo.eth` (registered by the agent's
+  role-bounded ENS key). The org name resolves to its treasury.
+
+Access is a bearer token (shown once). The AI runs on the platform's API key.
+
+## Deploy
+
+**Agent API** (Fly.io): see `fly.toml` — Docker build from
+`apps/agent/Dockerfile`, a 1GB volume at `/data` for SQLite, secrets per the
+comment block. Railway/Render work the same way (set `DATABASE_PATH` to the
+volume, `PORT` is respected). `ALLOW_ENV_ORG=false` in production makes every
+request require an org token.
+
+**Dashboard** (Vercel): project root `apps/web`, env
+`NEXT_PUBLIC_AGENT_API=https://<your-agent-host>`.
+
 ## Status
 
-Day 0 scaffold — treasury lane in progress. See plan in repo history.
+Multi-tenant, live on Arc testnet + ENSv2 Sepolia. See DEMO.md for the demo
+runbook and video script.

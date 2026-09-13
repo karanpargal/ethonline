@@ -38,16 +38,21 @@ export async function runCfoTick(instruction?: string) {
   };
 }
 
-// ---- Multi-turn chat (single-user demo: history lives in process memory) ----
+// ---- Multi-turn chat (histories live in process memory, keyed by org) ----
 
-let chatHistory: ModelMessage[] = [];
+import { currentOrg } from "./org.js";
+
+const chatHistories = new Map<string, ModelMessage[]>();
 
 export function resetChat() {
-  chatHistory = [];
+  chatHistories.delete(currentOrg().orgId);
 }
 
 export async function runCfoChat(userMessage: string) {
   materializeRecurring();
+  const orgId = currentOrg().orgId;
+  let chatHistory = chatHistories.get(orgId) ?? [];
+  chatHistories.set(orgId, chatHistory);
   chatHistory.push({ role: "user", content: userMessage });
   const result = await generateText({
     model: getModel(),
@@ -60,7 +65,10 @@ export async function runCfoChat(userMessage: string) {
   // Keep the full assistant/tool trace so follow-up turns have context.
   chatHistory.push(...result.response.messages);
   // Trim runaway histories (cost control): keep the last 40 messages.
-  if (chatHistory.length > 40) chatHistory = chatHistory.slice(-40);
+  if (chatHistory.length > 40) {
+    chatHistory = chatHistory.slice(-40);
+    chatHistories.set(orgId, chatHistory);
+  }
   return {
     reply: result.text,
     toolsUsed: result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),

@@ -2,9 +2,9 @@ import "./env.js";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { desc, eq } from "drizzle-orm";
-import { getDb, activity, invoices, payees } from "@autocfo/shared/db";
+import { and, desc, eq } from "drizzle-orm";
 import { erc20Abi } from "viem";
+import { getDb, activity, invoices, payees } from "@autocfo/shared/db";
 import {
   baseUnitsToUsdc,
   explorerTxUrl,
@@ -16,11 +16,59 @@ import { publicClient, sendUsdcFromTreasury } from "./privy.js";
 import { pettyCashState } from "./pettycash.js";
 import { startSeller } from "./seller.js";
 import { logActivity } from "./activity.js";
+import { onboardOrg } from "./onboarding.js";
+import { currentOrg, envOrg, orgFromToken, runWithOrg, type OrgContext } from "./org.js";
 
-const app = new Hono();
+type Env = { Variables: { org: OrgContext } };
+const app = new Hono<Env>();
 app.use("*", cors());
 
+// ---------- public ----------
+
 app.get("/health", (c) => c.json({ ok: true }));
+
+// Self-serve onboarding: provisions a full custodied tenant (~30-60s).
+app.post("/orgs", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body?.name || !body?.email)
+    return c.json({ error: "name and email required" }, 400);
+  try {
+    const result = await onboardOrg(String(body.name), String(body.email));
+    return c.json(result);
+  } catch (err) {
+    console.error("onboarding failed:", err);
+    return c.json({ error: String(err instanceof Error ? err.message : err) }, 500);
+  }
+});
+
+// ---------- tenant scope ----------
+// Bearer token → org row. Without a token, fall back to the legacy env org
+// ONLY when explicitly allowed (local dev); in production it's 401.
+
+app.use("*", async (c, next) => {
+  const auth = c.req.header("Authorization");
+  if (auth?.startsWith("Bearer ")) {
+    const org = orgFromToken(auth.slice(7).trim());
+    if (!org) return c.json({ error: "invalid token" }, 401);
+    c.set("org", org);
+  } else if (process.env.ALLOW_ENV_ORG !== "false") {
+    c.set("org", envOrg());
+  } else {
+    return c.json({ error: "missing bearer token — onboard at POST /orgs" }, 401);
+  }
+  return runWithOrg(c.get("org"), () => next());
+});
+
+app.get("/me", (c) => {
+  const org = c.get("org");
+  return c.json({
+    orgId: org.orgId,
+    name: org.name,
+    treasuryAddress: org.treasuryAddress,
+    pettyCashAddress: org.pettyCashAddress,
+    ensName: org.ensLabel ? `${org.ensLabel}.autocfo.eth` : null,
+  });
+});
 
 app.post("/agent/tick", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -41,16 +89,24 @@ app.post("/agent/chat/reset", (c) => {
 });
 
 app.get("/payees", (c) => {
-  return c.json(getDb().select().from(payees).all());
+  const org = c.get("org");
+  return c.json(
+    getDb().select().from(payees).where(eq(payees.orgId, org.orgId)).all(),
+  );
 });
 
 // Create an invoice from the dashboard ("upload" an incoming bill).
 app.post("/invoices", async (c) => {
+  const org = c.get("org");
   const body = await c.req.json().catch(() => null);
   if (!body?.payeeId || !body?.amountUsdc || !body?.memo)
     return c.json({ error: "payeeId, amountUsdc, memo required" }, 400);
   const db = getDb();
-  const payee = db.select().from(payees).where(eq(payees.id, body.payeeId)).get();
+  const payee = db
+    .select()
+    .from(payees)
+    .where(and(eq(payees.id, body.payeeId), eq(payees.orgId, org.orgId)))
+    .get();
   if (!payee) return c.json({ error: "payee not found" }, 404);
   const count = db.select().from(invoices).all().length;
   const id = `INV-${2000 + count}`;
@@ -60,6 +116,7 @@ app.post("/invoices", async (c) => {
   db.insert(invoices)
     .values({
       id,
+      orgId: org.orgId,
       payeeId: payee.id,
       amountBaseUnits: usdcToBaseUnits(String(body.amountUsdc)).toString(),
       memo: String(body.memo),
@@ -72,18 +129,22 @@ app.post("/invoices", async (c) => {
 });
 
 app.get("/invoices", (c) => {
+  const org = c.get("org");
   const rows = getDb()
     .select()
     .from(invoices)
     .innerJoin(payees, eq(invoices.payeeId, payees.id))
+    .where(eq(invoices.orgId, org.orgId))
     .all();
   return c.json(rows);
 });
 
 app.get("/activity", (c) => {
+  const org = c.get("org");
   const rows = getDb()
     .select()
     .from(activity)
+    .where(eq(activity.orgId, org.orgId))
     .orderBy(desc(activity.ts))
     .limit(100)
     .all();
@@ -93,9 +154,14 @@ app.get("/activity", (c) => {
 // Human approval endpoints. Approve executes with the OWNER quorum key —
 // the one key the agent never holds. This is the escalation path's second half.
 app.post("/invoices/:id/approve", async (c) => {
+  const org = c.get("org");
   const id = c.req.param("id");
   const db = getDb();
-  const inv = db.select().from(invoices).where(eq(invoices.id, id)).get();
+  const inv = db
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.id, id), eq(invoices.orgId, org.orgId)))
+    .get();
   if (!inv) return c.json({ error: "invoice not found" }, 404);
   if (inv.status !== "awaiting_approval")
     return c.json({ error: `invoice is ${inv.status}` }, 409);
@@ -126,9 +192,14 @@ app.post("/invoices/:id/approve", async (c) => {
 });
 
 app.post("/invoices/:id/reject", async (c) => {
+  const org = c.get("org");
   const id = c.req.param("id");
   const db = getDb();
-  const inv = db.select().from(invoices).where(eq(invoices.id, id)).get();
+  const inv = db
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.id, id), eq(invoices.orgId, org.orgId)))
+    .get();
   if (!inv) return c.json({ error: "invoice not found" }, 404);
   db.update(invoices).set({ status: "rejected" }).where(eq(invoices.id, id)).run();
   logActivity({
@@ -141,37 +212,32 @@ app.post("/invoices/:id/reject", async (c) => {
 });
 
 // Balance card data. Each lane resolves independently and tolerates missing
-// env (pre-setup) by returning null for that lane.
+// config (pre-funding) by returning null for that lane.
 app.get("/treasury", async (c) => {
+  const org = c.get("org");
   const [treasury, petty] = await Promise.all([
     (async () => {
-      const address = process.env.PRIVY_TREASURY_ADDRESS as
-        | `0x${string}`
-        | undefined;
-      if (!address) return null;
+      if (!org.treasuryAddress || org.treasuryAddress === "0x") return null;
       const { usdc } = getChainProfile();
       const balance = await publicClient().readContract({
         address: usdc,
         abi: erc20Abi,
         functionName: "balanceOf",
-        args: [address],
+        args: [org.treasuryAddress],
       });
-      return { address, usdcBalance: baseUnitsToUsdc(balance) };
+      return { address: org.treasuryAddress, usdcBalance: baseUnitsToUsdc(balance) };
     })().catch(() => null),
     (async () => {
-      if (!process.env.PETTY_CASH_PRIVATE_KEY) return null;
       const state = await pettyCashState();
       return JSON.parse(
-        JSON.stringify(state, (_k, v) =>
-          typeof v === "bigint" ? v.toString() : v,
-        ),
+        JSON.stringify(state, (_k, v) => (typeof v === "bigint" ? v.toString() : v)),
       );
     })().catch(() => null),
   ]);
   return c.json({ treasury, pettyCash: petty });
 });
 
-const port = Number(process.env.AGENT_PORT ?? 3001);
+const port = Number(process.env.PORT ?? process.env.AGENT_PORT ?? 3001);
 serve({ fetch: app.fetch, port }, () =>
   console.log(`AutoCFO agent API on :${port}`),
 );

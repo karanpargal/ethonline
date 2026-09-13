@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   formatUsdc,
+  setToken,
+  UnauthorizedError,
   type ActivityRow,
   type InvoiceRow,
   type Payee,
@@ -60,6 +62,8 @@ export default function Dashboard() {
   const [tick, setTick] = useState<TickResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [orgName, setOrgName] = useState<string | null>(null);
   const [approving, setApproving] = useState<string | null>(null);
 
   const decide = async (invoiceId: string, action: "approve" | "reject") => {
@@ -79,16 +83,28 @@ export default function Dashboard() {
       const [inv, act, tre] = await Promise.all([
         api.invoices(),
         api.activity(),
-        api.treasury().catch(() => null),
+        api.treasury().catch((e) => {
+          if (e instanceof UnauthorizedError) throw e;
+          return null;
+        }),
       ]);
       setInvoices(inv);
       setActivity(act);
       setTreasury(tre);
       setError(null);
+      setNeedsOnboarding(false);
     } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        setNeedsOnboarding(true);
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
+
+  useEffect(() => {
+    api.me().then((m) => setOrgName(m.name)).catch(() => {});
+  }, [needsOnboarding]);
 
   useEffect(() => {
     refresh();
@@ -110,6 +126,10 @@ export default function Dashboard() {
     }
   };
 
+  if (needsOnboarding) {
+    return <Onboarding onDone={refresh} />;
+  }
+
   const pending = invoices.filter((i) => i.invoices.status === "pending");
   const awaiting = invoices.filter((i) => i.invoices.status === "awaiting_approval");
   const pendingTotal = pending
@@ -123,7 +143,8 @@ export default function Dashboard() {
         <div>
           <h1 className="font-display text-4xl italic tracking-tight">AutoCFO</h1>
           <p className="micro-label mt-1">
-            Autonomous treasury · mandate enforced by policy, not prompt
+            {orgName ? `${orgName} · ` : ""}autonomous treasury · mandate
+            enforced by policy, not prompt
           </p>
         </div>
         <button
@@ -339,6 +360,113 @@ export default function Dashboard() {
         Mandate: allowlisted payees · per-tx cap · daily budget — enforced by
         Privy policies in a TEE. Over-mandate spend requires human MFA approval.
       </footer>
+    </div>
+  );
+}
+
+function Onboarding({ onDone }: { onDone: () => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<Awaited<ReturnType<typeof api.onboard>> | null>(null);
+
+  const submit = async () => {
+    if (!name.trim() || !email.trim()) return setErr("both fields are required");
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.onboard(name.trim(), email.trim());
+      setToken(r.token);
+      setResult(r);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (result) {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-6">
+        <h1 className="font-display text-3xl italic">Welcome, {name}.</h1>
+        <div className="mt-6 space-y-4 border border-line bg-field-raised p-6 text-sm">
+          <Row label="Org id" value={result.orgId} />
+          <Row label="Treasury (Arc)" value={result.treasuryAddress} mono copyable />
+          <Row label="Petty cash" value={result.pettyCashAddress} mono copyable />
+          {result.ensName && <Row label="ENS identity" value={result.ensName} mono />}
+          <Row label="Access token — save it, shown once" value={result.token} mono copyable />
+          <p className="text-xs text-ink-soft">
+            Your treasury starts empty: fund both addresses with Arc testnet
+            USDC at faucet.circle.com, then grant payment authority to your
+            first payee in chat. We custody the keys, your ENS name, and the
+            AI — you bring the decisions.
+          </p>
+        </div>
+        <button
+          onClick={() => onDone()}
+          className="mt-6 border border-ink bg-ink px-4 py-2 text-sm text-field hover:bg-ink/85"
+        >
+          Open my dashboard →
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+      <h1 className="font-display text-4xl italic tracking-tight">AutoCFO</h1>
+      <p className="micro-label mt-1">an autonomous CFO for your org</p>
+      <div className="mt-8 space-y-3">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Organization name"
+          className="w-full border border-line-strong bg-field-raised px-3 py-2.5 text-sm placeholder:text-ink-faint focus:border-ink focus:outline-none"
+        />
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="Your email"
+          className="w-full border border-line-strong bg-field-raised px-3 py-2.5 text-sm placeholder:text-ink-faint focus:border-ink focus:outline-none"
+        />
+        <button
+          onClick={submit}
+          disabled={busy}
+          className="w-full border border-ink bg-ink px-4 py-2.5 text-sm text-field transition hover:bg-ink/85 disabled:opacity-40"
+        >
+          {busy ? "Provisioning treasury, policy & ENS… (~1 min)" : "Create my CFO"}
+        </button>
+        {err && <p className="text-xs text-alert">{err}</p>}
+        <p className="text-xs text-ink-faint">
+          We provision a Privy organization wallet with a TEE-enforced spending
+          mandate, a petty-cash account for x402 micropayments, and an on-chain
+          ENS identity — all custodied for you.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  mono,
+  copyable,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  copyable?: boolean;
+}) {
+  return (
+    <div>
+      <div className="micro-label">{label}</div>
+      <div className={`mt-0.5 flex items-center gap-2 break-all ${mono ? "font-ledger text-[13px]" : ""}`}>
+        {value}
+        {copyable && <CopyButton text={value} />}
+      </div>
     </div>
   );
 }

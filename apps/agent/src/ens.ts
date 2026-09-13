@@ -89,8 +89,15 @@ export function ensWallet(kind: "owner" | "agent") {
 }
 
 export const companyName = () => process.env.ENS_COMPANY_LABEL ?? "autocfo";
-export const payeeNode = (label: string) =>
-  namehash(normalize(`${label}.${companyName()}.eth`));
+
+/** Full ENS name for a payee label in the current org's namespace. */
+export function payeeFullName(label: string, orgLabel?: string | null): string {
+  return orgLabel
+    ? `${label}.${orgLabel}.${companyName()}.eth`
+    : `${label}.${companyName()}.eth`;
+}
+export const payeeNode = (label: string, orgLabel?: string | null) =>
+  namehash(normalize(payeeFullName(label, orgLabel)));
 
 /**
  * Resolve a payee name (e.g. "nimbushost.autocfo.eth") through ENSv2's

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDb, activity } from "@autocfo/shared/db";
+import { currentOrg } from "./org.js";
 
 type Kind = (typeof activity.$inferInsert)["kind"];
 
@@ -14,6 +15,7 @@ export function logActivity(opts: {
     .insert(activity)
     .values({
       id: randomUUID(),
+      orgId: currentOrg().orgId,
       ts: new Date(),
       kind: opts.kind,
       summary: opts.summary,

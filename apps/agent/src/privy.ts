@@ -11,6 +11,7 @@ import {
   ARC_MIN_BASE_FEE_GWEI,
   getChainProfile,
 } from "@autocfo/shared/chain";
+import { currentOrg } from "./org.js";
 
 let _privy: PrivyClient | null = null;
 
@@ -43,11 +44,10 @@ export const publicClient = () => {
 export type Signer = "agent" | "owner";
 
 function authContext(signer: Signer) {
-  return {
-    authorization_private_keys: [
-      requiredEnv(signer === "owner" ? "PRIVY_ADMIN_AUTH_KEY" : "PRIVY_AGENT_AUTH_KEY"),
-    ],
-  };
+  const org = currentOrg();
+  const key = signer === "owner" ? org.adminAuthKey : org.agentAuthKey;
+  if (!key) throw new Error(`no ${signer} auth key for org ${org.orgId}`);
+  return { authorization_private_keys: [key] };
 }
 
 export interface SendResult {
@@ -71,7 +71,8 @@ export async function sendUsdcFromTreasury(
   signer: Signer = "agent",
 ): Promise<SendResult> {
   const privy = getPrivy();
-  const walletId = requiredEnv("PRIVY_TREASURY_WALLET_ID");
+  const walletId = currentOrg().walletId;
+  if (!walletId) throw new Error("org has no treasury wallet");
   const { chain, usdc, caip2 } = getChainProfile();
   const data = encodeFunctionData({
     abi: erc20Abi,
@@ -100,7 +101,7 @@ export async function sendUsdcFromTreasury(
 
   // Fallback A: Privy signs (policy-checked), we broadcast against Arc RPC ourselves.
   const pub = publicClient();
-  const treasury = requiredEnv("PRIVY_TREASURY_ADDRESS") as `0x${string}`;
+  const treasury = currentOrg().treasuryAddress;
   const nonce = await pub.getTransactionCount({ address: treasury });
   const gas = await pub.estimateGas({
     account: treasury,

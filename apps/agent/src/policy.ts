@@ -1,7 +1,9 @@
 import { PrivyClient } from "@privy-io/node";
+import { eq } from "drizzle-orm";
 import { getDb, allowlist } from "@autocfo/shared/db";
 import { getChainProfile } from "@autocfo/shared";
-import { getPrivy, requiredEnv } from "./privy.js";
+import { getPrivy } from "./privy.js";
+import { currentOrg } from "./org.js";
 
 type PolicyRule = Parameters<
   ReturnType<PrivyClient["policies"]>["create"]
@@ -26,8 +28,13 @@ const TRANSFER_ABI = [
  * ADMIN key — only call this after explicit human confirmation.
  */
 export async function syncPolicyFromAllowlist(): Promise<{ rules: number }> {
+  const org = currentOrg();
   const { usdc } = getChainProfile();
-  const rows = getDb().select().from(allowlist).all();
+  const rows = getDb()
+    .select()
+    .from(allowlist)
+    .where(eq(allowlist.orgId, org.orgId))
+    .all();
   const rules: PolicyRule[] = [];
   for (const method of ["eth_sendTransaction", "eth_signTransaction"] as const) {
     for (const row of rows) {
@@ -58,10 +65,10 @@ export async function syncPolicyFromAllowlist(): Promise<{ rules: number }> {
   }
   await getPrivy()
     .policies()
-    .update(requiredEnv("PRIVY_POLICY_ID"), {
+    .update(org.policyId, {
       rules,
       authorization_context: {
-        authorization_private_keys: [requiredEnv("PRIVY_ADMIN_AUTH_KEY")],
+        authorization_private_keys: [org.adminAuthKey],
       },
     });
   return { rules: rules.length };

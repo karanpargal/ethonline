@@ -21,6 +21,8 @@ import { resolvePayee } from "./ens.js";
 import { onboardPayeeOnEns } from "./ens-onboard.js";
 import { logActivity } from "./activity.js";
 import { randomUUID } from "node:crypto";
+import { and } from "drizzle-orm";
+import { currentOrg } from "./org.js";
 
 // Maps our payee preferred-chain slugs to Gateway chain names.
 const GATEWAY_CHAINS: Record<string, "arcTestnet" | "baseSepolia"> = {
@@ -53,6 +55,7 @@ export const cfoTools = {
         })
         .from(invoices)
         .innerJoin(payees, eq(invoices.payeeId, payees.id))
+        .where(eq(invoices.orgId, currentOrg().orgId))
         .all();
       const filtered =
         status === "all" ? rows : rows.filter((r) => r.status === status);
@@ -71,7 +74,7 @@ export const cfoTools = {
     inputSchema: z.object({}),
     execute: async () => {
       const { usdc } = getChainProfile();
-      const treasury = requiredEnv("PRIVY_TREASURY_ADDRESS") as `0x${string}`;
+      const treasury = currentOrg().treasuryAddress;
       const balance = await publicClient().readContract({
         address: usdc,
         abi: erc20Abi,
@@ -315,16 +318,21 @@ export const cfoTools = {
       if (!humanConfirmed)
         return { error: "not confirmed — ask the human to approve the address and cap first" };
       const db = getDb();
-      const existing = db.select().from(allowlist).where(eq(allowlist.address, address)).get();
+      const existing = db
+        .select()
+        .from(allowlist)
+        .where(and(eq(allowlist.address, address), eq(allowlist.orgId, currentOrg().orgId)))
+        .get();
       if (existing) {
         db.update(allowlist)
           .set({ capBaseUnits: usdcToBaseUnits(capUsdc).toString(), label })
-          .where(eq(allowlist.address, address))
+          .where(and(eq(allowlist.address, address), eq(allowlist.orgId, currentOrg().orgId)))
           .run();
       } else {
         db.insert(allowlist)
           .values({
             address,
+            orgId: currentOrg().orgId,
             label,
             capBaseUnits: usdcToBaseUnits(capUsdc).toString(),
             createdAt: new Date(),
@@ -352,6 +360,7 @@ export const cfoTools = {
       return getDb()
         .select()
         .from(allowlist)
+        .where(eq(allowlist.orgId, currentOrg().orgId))
         .all()
         .map((r) => ({
           address: r.address,
@@ -385,6 +394,7 @@ export const cfoTools = {
       db.insert(recurring)
         .values({
           id,
+          orgId: currentOrg().orgId,
           payeeId,
           amountBaseUnits: usdcToBaseUnits(amountUsdc).toString(),
           memo,
@@ -430,6 +440,7 @@ export const cfoTools = {
           .insert(payees)
           .values({
             id: `PAYEE-${randomUUID().slice(0, 8)}`,
+            orgId: currentOrg().orgId,
             name: displayName,
             address: payoutAddress,
             ensName: fullName,

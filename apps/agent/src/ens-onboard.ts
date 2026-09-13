@@ -5,21 +5,25 @@ import { encodeFunctionData, type Address } from "viem";
 import {
   REGISTRY_ABI,
   RESOLVER_ABI,
-  companyName,
   ensPublicClient,
   ensWallet,
+  payeeFullName,
   payeeNode,
 } from "./ens.js";
+import { currentOrg } from "./org.js";
 
 export async function onboardPayeeOnEns(
   label: string,
   payoutAddress: Address,
   preferredChain: string,
 ): Promise<{ fullName: string; txHashes: string[] }> {
-  const registry = process.env.ENS_USER_REGISTRY as Address | undefined;
+  const org = currentOrg();
+  // Each org has its own subregistry; the env org registers directly in the
+  // company root registry. Records always live on our shared resolver.
+  const registry = (org.ensRegistry ?? process.env.ENS_USER_REGISTRY) as Address | undefined;
   const resolver = process.env.ENS_RESOLVER as Address | undefined;
   if (!registry || !resolver)
-    throw new Error("ENS_USER_REGISTRY / ENS_RESOLVER not set — run ens-setup first");
+    throw new Error("org has no ENS registry / ENS_RESOLVER not set");
   const wallet = ensWallet("agent");
   const pub = ensPublicClient();
   const owner = wallet.account.address;
@@ -37,14 +41,14 @@ export async function onboardPayeeOnEns(
     ],
     [
       resolver,
-      encodeFunctionData({ abi: RESOLVER_ABI, functionName: "setAddr", args: [payeeNode(label), payoutAddress] }),
+      encodeFunctionData({ abi: RESOLVER_ABI, functionName: "setAddr", args: [payeeNode(label, org.ensLabel), payoutAddress] }),
     ],
     [
       resolver,
       encodeFunctionData({
         abi: RESOLVER_ABI,
         functionName: "setText",
-        args: [payeeNode(label), "autocfo.chain", preferredChain],
+        args: [payeeNode(label, org.ensLabel), "autocfo.chain", preferredChain],
       }),
     ],
   ];
@@ -54,5 +58,5 @@ export async function onboardPayeeOnEns(
     if (receipt.status !== "success") throw new Error(`onboard step reverted: ${hash}`);
     txHashes.push(hash);
   }
-  return { fullName: `${label}.${companyName()}.eth`, txHashes };
+  return { fullName: payeeFullName(label, org.ensLabel), txHashes };
 }
