@@ -66,6 +66,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [orgName, setOrgName] = useState<string | null>(null);
   const [approving, setApproving] = useState<string | null>(null);
 
@@ -158,6 +159,13 @@ export default function Dashboard() {
             {orgName ? `${orgName} · ` : ""}autonomous treasury · mandate
             enforced by policy, not prompt
             {" · "}
+            <button
+              onClick={() => setShowProfile(true)}
+              className="underline decoration-dotted underline-offset-2 hover:text-ink"
+            >
+              company profile
+            </button>
+            {" · "}
             {getToken() ? (
               <button
                 onClick={() => {
@@ -192,6 +200,8 @@ export default function Dashboard() {
           {error} — is the agent service running on :3001?
         </div>
       )}
+
+      {showProfile && <Profile onClose={() => setShowProfile(false)} />}
 
       {/* Balance strip */}
       <section className="mt-6 grid grid-cols-2 gap-px border border-line bg-line md:grid-cols-4">
@@ -395,6 +405,126 @@ export default function Dashboard() {
   );
 }
 
+function Profile({ onClose }: { onClose: () => void }) {
+  const [me, setMe] = useState<Awaited<ReturnType<typeof api.me>> | null>(null);
+  const [authority, setAuthority] = useState<
+    Awaited<ReturnType<typeof api.authority>>
+  >([]);
+
+  useEffect(() => {
+    api.me().then(setMe).catch(() => {});
+    api.authority().then(setAuthority).catch(() => {});
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/30 p-6 pt-20"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg border border-line bg-field-raised shadow-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-line px-5 py-3">
+          <span className="micro-label">Company profile</span>
+          <button onClick={onClose} className="text-ink-faint hover:text-ink">
+            ✕
+          </button>
+        </div>
+        {!me ? (
+          <p className="px-5 py-8 text-sm text-ink-faint">loading…</p>
+        ) : (
+          <div className="space-y-4 px-5 py-5 text-sm">
+            <Row label="Organization" value={`${me.name} (${me.orgId})`} />
+            <div className="flex gap-8">
+              <div>
+                <div className="micro-label">Per-payment cap</div>
+                <div className="font-ledger mt-0.5">${me.perTxCapUsdc}</div>
+              </div>
+              <div>
+                <div className="micro-label">Daily budget</div>
+                <div className="font-ledger mt-0.5">${me.dailyCapUsdc}</div>
+              </div>
+            </div>
+            {me.ensName && (
+              <div>
+                <div className="micro-label">ENS identity · Sepolia</div>
+                <div className="font-ledger mt-0.5 flex items-center gap-2 text-[13px]">
+                  {me.ensName}
+                  <CopyButton text={me.ensName} />
+                </div>
+                {me.ensRegistry && (
+                  <div className="mt-1 text-[11px] text-ink-faint">
+                    payee subregistry:{" "}
+                    <a
+                      href={`https://sepolia.etherscan.io/address/${me.ensRegistry}`}
+                      target="_blank"
+                      className="font-ledger text-brass-ink underline decoration-dotted underline-offset-2"
+                    >
+                      {me.ensRegistry.slice(0, 10)}… ↗
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+            <div>
+              <div className="micro-label">Treasury · {me.chain}</div>
+              <div className="font-ledger mt-0.5 flex items-center gap-2 break-all text-[13px]">
+                {me.treasuryAddress}
+                <CopyButton text={me.treasuryAddress} />
+                <a
+                  href={`https://testnet.arcscan.app/address/${me.treasuryAddress}`}
+                  target="_blank"
+                  className="text-brass-ink underline decoration-dotted underline-offset-2"
+                >
+                  ↗
+                </a>
+              </div>
+            </div>
+            <div>
+              <div className="micro-label">Petty cash (x402 · Gateway)</div>
+              <div className="font-ledger mt-0.5 flex items-center gap-2 break-all text-[13px]">
+                {me.pettyCashAddress}
+                <CopyButton text={me.pettyCashAddress} />
+              </div>
+            </div>
+            <div>
+              <div className="micro-label">Payment authority (TEE-enforced)</div>
+              {authority.length === 0 ? (
+                <p className="mt-1 text-xs text-ink-faint">
+                  None yet — grant it in chat; the agent will ask you to
+                  confirm each address and cap.
+                </p>
+              ) : (
+                <table className="mt-1 w-full text-xs">
+                  <tbody>
+                    {authority.map((a) => (
+                      <tr key={a.address} className="border-b border-line last:border-0">
+                        <td className="py-1.5 pr-2">{a.label}</td>
+                        <td className="font-ledger py-1.5 pr-2 text-ink-soft">
+                          {a.address.slice(0, 8)}…{a.address.slice(-6)}
+                        </td>
+                        <td className="font-ledger py-1.5 text-right">
+                          ≤ ${a.capUsdc}/tx
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <p className="border-t border-line pt-3 text-[11px] leading-relaxed text-ink-faint">
+              Keys, ENS name, and AI are custodied by AutoCFO. The agent signs
+              with a policy-bounded key; over-mandate payments require your
+              approval, executed with the owner key the agent never holds.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Onboarding({
   onDone,
   onCancel,
@@ -404,16 +534,18 @@ function Onboarding({
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [perTx, setPerTx] = useState("10");
+  const [daily, setDaily] = useState("200");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<Awaited<ReturnType<typeof api.onboard>> | null>(null);
 
   const submit = async () => {
-    if (!name.trim() || !email.trim()) return setErr("both fields are required");
+    if (!name.trim() || !email.trim()) return setErr("name and email are required");
     setBusy(true);
     setErr(null);
     try {
-      const r = await api.onboard(name.trim(), email.trim());
+      const r = await api.onboard(name.trim(), email.trim(), perTx, daily);
       setToken(r.token);
       setResult(r);
     } catch (e) {
@@ -468,6 +600,24 @@ function Onboarding({
           placeholder="Your email"
           className="w-full border border-line-strong bg-field-raised px-3 py-2.5 text-sm placeholder:text-ink-faint focus:border-ink focus:outline-none"
         />
+        <div className="flex gap-3">
+          <label className="flex-1">
+            <span className="micro-label">Per-payment cap (USDC)</span>
+            <input
+              value={perTx}
+              onChange={(e) => setPerTx(e.target.value)}
+              className="font-ledger mt-1 w-full border border-line-strong bg-field-raised px-3 py-2 text-sm focus:border-ink focus:outline-none"
+            />
+          </label>
+          <label className="flex-1">
+            <span className="micro-label">Daily budget (USDC)</span>
+            <input
+              value={daily}
+              onChange={(e) => setDaily(e.target.value)}
+              className="font-ledger mt-1 w-full border border-line-strong bg-field-raised px-3 py-2 text-sm focus:border-ink focus:outline-none"
+            />
+          </label>
+        </div>
         <button
           onClick={submit}
           disabled={busy}

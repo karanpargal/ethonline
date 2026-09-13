@@ -18,6 +18,8 @@ export interface OrgContext {
   pettyCashAddress: `0x${string}`;
   ensLabel: string | null; // org subname label under the company root
   ensRegistry: `0x${string}` | null; // org's own ENSv2 subregistry
+  perTxCapUsdc: string;
+  dailyCapUsdc: string;
 }
 
 const als = new AsyncLocalStorage<OrgContext>();
@@ -35,6 +37,8 @@ export function envOrg(): OrgContext {
     pettyCashAddress: "0x158D69B73b12C3b8116A1aFF06a7E327371B3c3d",
     ensLabel: null, // env org owns the root name itself
     ensRegistry: (process.env.ENS_USER_REGISTRY ?? null) as `0x${string}` | null,
+    perTxCapUsdc: process.env.PER_TX_CAP_USDC ?? "10",
+    dailyCapUsdc: process.env.DAILY_BUDGET_USDC ?? "200",
   };
 }
 
@@ -51,6 +55,8 @@ export function orgFromRow(row: typeof orgs.$inferSelect): OrgContext {
     pettyCashAddress: row.pettyCashAddress as `0x${string}`,
     ensLabel: row.ensLabel,
     ensRegistry: (row.ensRegistry ?? null) as `0x${string}` | null,
+    perTxCapUsdc: row.perTxCapUsdc,
+    dailyCapUsdc: row.dailyCapUsdc,
   };
 }
 

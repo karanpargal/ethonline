@@ -113,15 +113,21 @@ export const api = {
       treasuryAddress: string;
       pettyCashAddress: string;
       ensName: string | null;
+      ensRegistry: string | null;
+      perTxCapUsdc: string;
+      dailyCapUsdc: string;
+      chain: string;
     }>("/me"),
-  onboard: (name: string, email: string) =>
+  authority: () =>
+    get<{ address: string; label: string; capUsdc: string }[]>("/authority"),
+  onboard: (name: string, email: string, perTxCapUsdc?: string, dailyCapUsdc?: string) =>
     post<{
       orgId: string;
       token: string;
       treasuryAddress: string;
       pettyCashAddress: string;
       ensName: string | null;
-    }>("/orgs", { name, email }),
+    }>("/orgs", { name, email, perTxCapUsdc, dailyCapUsdc }),
   createInvoice: (input: {
     payeeId: string;
     amountUsdc: string;

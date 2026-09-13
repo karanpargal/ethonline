@@ -33,6 +33,11 @@ export interface OnboardResult {
   ensName: string | null;
 }
 
+function sanitizeCap(v: string | undefined, fallback: string): string {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 && n <= 1_000_000 ? String(n) : fallback;
+}
+
 export function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -41,7 +46,11 @@ export function slugify(name: string): string {
     .slice(0, 24);
 }
 
-export async function onboardOrg(name: string, email: string): Promise<OnboardResult> {
+export async function onboardOrg(
+  name: string,
+  email: string,
+  caps?: { perTxCapUsdc?: string; dailyCapUsdc?: string },
+): Promise<OnboardResult> {
   const db = getDb();
   let slug = slugify(name);
   if (!slug) throw new Error("org name must contain letters or numbers");
@@ -126,6 +135,8 @@ export async function onboardOrg(name: string, email: string): Promise<OnboardRe
       pettyCashAddress: pettyAddress,
       ensLabel,
       ensRegistry,
+      perTxCapUsdc: sanitizeCap(caps?.perTxCapUsdc, "10"),
+      dailyCapUsdc: sanitizeCap(caps?.dailyCapUsdc, "200"),
       createdAt: new Date(),
     })
     .run();

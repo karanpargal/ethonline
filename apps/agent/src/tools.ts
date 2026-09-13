@@ -23,6 +23,7 @@ import { logActivity } from "./activity.js";
 import { randomUUID } from "node:crypto";
 import { and } from "drizzle-orm";
 import { currentOrg } from "./org.js";
+import { checkDailyBudget, recordOutflow, spentTodayBaseUnits } from "./spend.js";
 
 // Maps our payee preferred-chain slugs to Gateway chain names.
 const GATEWAY_CHAINS: Record<string, "arcTestnet" | "baseSepolia"> = {
@@ -85,9 +86,10 @@ export const cfoTools = {
         treasuryAddress: treasury,
         usdcBalance: baseUnitsToUsdc(balance),
         mandate: {
-          perTxCapUsdc: process.env.PER_TX_CAP_USDC ?? "50",
-          dailyBudgetUsdc: process.env.DAILY_BUDGET_USDC ?? "200",
-          note: "Payments over the per-tx cap or to non-allowlisted payees WILL be policy-denied — escalate those via propose_approval directly instead of attempting.",
+          orgPerTxCapUsdc: currentOrg().perTxCapUsdc,
+          orgDailyBudgetUsdc: currentOrg().dailyCapUsdc,
+          spentTodayUsdc: baseUnitsToUsdc(spentTodayBaseUnits()),
+          note: "Per-payee caps (see list_payment_authority) are TEE-enforced; the org daily budget is enforced before every send. Over-cap or over-budget payments must be escalated via propose_approval.",
         },
         note: "USDC is native gas on Arc; this ERC-20 balance IS the full treasury balance (single representation).",
       };
@@ -116,11 +118,22 @@ export const cfoTools = {
         payTo = address;
         resolvedVia = payee.ensName;
       }
+      const budgetDenial = checkDailyBudget(BigInt(inv.amountBaseUnits));
+      if (budgetDenial) {
+        logActivity({
+          kind: "policy_denied",
+          summary: `Payment of ${baseUnitsToUsdc(BigInt(inv.amountBaseUnits))} USDC to ${payee.name} blocked (daily budget)`,
+          detail: { signal: "invoice_due", reason: "daily_budget", budgetDenial },
+          invoiceId,
+        });
+        return { denied: true, reason: "daily_budget", hint: budgetDenial };
+      }
       try {
         const { hash, mode } = await sendUsdcFromTreasury(
           payTo,
           BigInt(inv.amountBaseUnits),
         );
+        recordOutflow(BigInt(inv.amountBaseUnits), "invoice");
         db.update(invoices)
           .set({ status: "paid", txHash: hash })
           .where(eq(invoices.id, invoiceId))
@@ -209,11 +222,14 @@ export const cfoTools = {
     }),
     execute: async ({ amountUsdc }) => {
       const client = pettyCash();
+      const budgetDenial = checkDailyBudget(usdcToBaseUnits(amountUsdc));
+      if (budgetDenial) return { denied: true, reason: "daily_budget", hint: budgetDenial };
       try {
         const { hash } = await sendUsdcFromTreasury(
           client.address,
           usdcToBaseUnits(amountUsdc),
         );
+        recordOutflow(usdcToBaseUnits(amountUsdc), "topup");
         await publicClient().waitForTransactionReceipt({
           hash: hash as `0x${string}`,
         });
@@ -275,6 +291,8 @@ export const cfoTools = {
       const chain = GATEWAY_CHAINS[payee.preferredChain];
       if (!chain) return { error: `unsupported payout chain ${payee.preferredChain}` };
       const amount = baseUnitsToUsdc(BigInt(inv.amountBaseUnits));
+      const budgetDenial = checkDailyBudget(BigInt(inv.amountBaseUnits));
+      if (budgetDenial) return { denied: true, reason: "daily_budget", hint: budgetDenial };
       try {
         const result = await pettyCash().withdraw(amount, {
           chain,
@@ -285,6 +303,7 @@ export const cfoTools = {
             (result as { txHash?: string }).txHash ??
             "",
         );
+        recordOutflow(BigInt(inv.amountBaseUnits), "cross_chain");
         db.update(invoices)
           .set({ status: "paid", txHash })
           .where(eq(invoices.id, invoiceId))
@@ -317,6 +336,11 @@ export const cfoTools = {
     execute: async ({ address, label, capUsdc, humanConfirmed }) => {
       if (!humanConfirmed)
         return { error: "not confirmed — ask the human to approve the address and cap first" };
+      const org = currentOrg();
+      if (usdcToBaseUnits(capUsdc) > usdcToBaseUnits(org.perTxCapUsdc))
+        return {
+          error: `cap $${capUsdc} exceeds this organization's per-transaction limit of $${org.perTxCapUsdc} — tell the human the maximum allowed and ask them to pick a cap within it`,
+        };
       const db = getDb();
       const existing = db
         .select()

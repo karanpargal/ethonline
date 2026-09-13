@@ -4,7 +4,13 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { and, desc, eq } from "drizzle-orm";
 import { erc20Abi } from "viem";
-import { getDb, activity, invoices, payees } from "@autocfo/shared/db";
+import {
+  getDb,
+  activity,
+  allowlist as allowlistTable,
+  invoices,
+  payees,
+} from "@autocfo/shared/db";
 import {
   baseUnitsToUsdc,
   explorerTxUrl,
@@ -33,7 +39,10 @@ app.post("/orgs", async (c) => {
   if (!body?.name || !body?.email)
     return c.json({ error: "name and email required" }, 400);
   try {
-    const result = await onboardOrg(String(body.name), String(body.email));
+    const result = await onboardOrg(String(body.name), String(body.email), {
+      perTxCapUsdc: body.perTxCapUsdc,
+      dailyCapUsdc: body.dailyCapUsdc,
+    });
     return c.json(result);
   } catch (err) {
     console.error("onboarding failed:", err);
@@ -66,8 +75,33 @@ app.get("/me", (c) => {
     name: org.name,
     treasuryAddress: org.treasuryAddress,
     pettyCashAddress: org.pettyCashAddress,
-    ensName: org.ensLabel ? `${org.ensLabel}.autocfo.eth` : null,
+    ensName: org.ensLabel
+      ? `${org.ensLabel}.autocfo.eth`
+      : org.orgId === "env"
+        ? "autocfo.eth"
+        : null,
+    ensRegistry: org.ensRegistry,
+    perTxCapUsdc: org.perTxCapUsdc,
+    dailyCapUsdc: org.dailyCapUsdc,
+    chain: "Arc testnet (5042002)",
   });
+});
+
+// The org's payment authority (mirrors the Privy policy rules).
+app.get("/authority", (c) => {
+  const org = c.get("org");
+  const rows = getDb()
+    .select()
+    .from(allowlistTable)
+    .where(eq(allowlistTable.orgId, org.orgId))
+    .all();
+  return c.json(
+    rows.map((r) => ({
+      address: r.address,
+      label: r.label,
+      capUsdc: baseUnitsToUsdc(BigInt(r.capBaseUnits)),
+    })),
+  );
 });
 
 app.post("/agent/tick", async (c) => {

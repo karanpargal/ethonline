@@ -20,7 +20,20 @@ export const orgs = sqliteTable("orgs", {
   pettyCashAddress: text("petty_cash_address").notNull(),
   ensLabel: text("ens_label"),
   ensRegistry: text("ens_registry"),
+  // Org-wide mandate: no payee cap may exceed perTxCap; dailyCap bounds total
+  // agent-initiated outflow per UTC day (owner approvals bypass it).
+  perTxCapUsdc: text("per_tx_cap_usdc").notNull().default("10"),
+  dailyCapUsdc: text("daily_cap_usdc").notNull().default("200"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+// Every successful agent-initiated outflow, for daily-budget accounting.
+export const outflows = sqliteTable("outflows", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().default("env"),
+  ts: integer("ts", { mode: "timestamp" }).notNull(),
+  baseUnits: text("base_units").notNull(),
+  kind: text("kind").notNull(), // invoice | cross_chain | topup
 });
 
 export const payees = sqliteTable("payees", {
