@@ -61,6 +61,8 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
     method: "POST",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    // Chat turns with several on-chain tool calls can take a while.
+    signal: AbortSignal.timeout(300_000),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -86,6 +88,9 @@ export const api = {
   reject: (invoiceId: string) =>
     post<{ rejected: boolean }>(`/invoices/${invoiceId}/reject`),
   payees: () => get<Payee[]>("/payees"),
+  chat: (message: string) =>
+    post<{ reply: string; toolsUsed: string[] }>("/agent/chat", { message }),
+  chatReset: () => post<{ reset: boolean }>("/agent/chat/reset"),
   createInvoice: (input: {
     payeeId: string;
     amountUsdc: string;

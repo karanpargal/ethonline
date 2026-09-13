@@ -39,6 +39,16 @@ export const invoices = sqliteTable("invoices", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// The payment-authority list mirrored into the Privy policy: each row becomes
+// an ALLOW rule (recipient == address AND amount <= cap). Additions happen only
+// after explicit human confirmation in chat; the sync signs with the admin key.
+export const allowlist = sqliteTable("allowlist", {
+  address: text("address").primaryKey(),
+  label: text("label").notNull(),
+  capBaseUnits: text("cap_base_units").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
 // Standing payment schedules (payroll, subscriptions). Each tick, schedules
 // past nextDue are materialized into normal pending invoices by code (not the
 // LLM), so recurring payments flow through the same mandate/escalation path.

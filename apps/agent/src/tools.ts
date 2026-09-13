@@ -2,7 +2,8 @@ import { tool } from "ai";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { erc20Abi } from "viem";
-import { getDb, invoices, payees, recurring } from "@autocfo/shared/db";
+import { allowlist, getDb, invoices, payees, recurring } from "@autocfo/shared/db";
+import { syncPolicyFromAllowlist } from "./policy.js";
 import {
   baseUnitsToUsdc,
   explorerTxUrl,
@@ -296,6 +297,67 @@ export const cfoTools = {
       } catch (err) {
         return { error: String(err), hint: "Gateway balance may be too low — top up petty cash." };
       }
+    },
+  }),
+
+  grant_payment_authority: tool({
+    description:
+      "Add an address to the Privy policy allowlist with a per-payment cap, or update its cap. This REWRITES THE ON-CHAIN-ENFORCED MANDATE and is signed with the owner's admin key, so it is strictly human-gated: you may ONLY call it after the human has, in THIS conversation, explicitly confirmed BOTH the address and the cap amount. If they haven't, ask them first instead of calling this.",
+    inputSchema: z.object({
+      address: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
+      label: z.string().describe("short payee label for the policy rule"),
+      capUsdc: z.string().describe("max USDC per payment the agent may send them"),
+      humanConfirmed: z
+        .boolean()
+        .describe("true ONLY if the human explicitly approved this address AND cap in this conversation"),
+    }),
+    execute: async ({ address, label, capUsdc, humanConfirmed }) => {
+      if (!humanConfirmed)
+        return { error: "not confirmed — ask the human to approve the address and cap first" };
+      const db = getDb();
+      const existing = db.select().from(allowlist).where(eq(allowlist.address, address)).get();
+      if (existing) {
+        db.update(allowlist)
+          .set({ capBaseUnits: usdcToBaseUnits(capUsdc).toString(), label })
+          .where(eq(allowlist.address, address))
+          .run();
+      } else {
+        db.insert(allowlist)
+          .values({
+            address,
+            label,
+            capBaseUnits: usdcToBaseUnits(capUsdc).toString(),
+            createdAt: new Date(),
+          })
+          .run();
+      }
+      try {
+        const { rules } = await syncPolicyFromAllowlist();
+        logActivity({
+          kind: "agent_note",
+          summary: `Payment authority ${existing ? "updated" : "granted"}: ${label} (${address.slice(0, 8)}…) cap $${capUsdc}/payment — human-confirmed, policy resynced (${rules} rules)`,
+          detail: { signal: "human_confirmation", address, capUsdc },
+        });
+        return { granted: true, address, capUsdc, policyRules: rules };
+      } catch (err) {
+        return { error: `policy sync failed: ${String(err instanceof Error ? err.message : err)}` };
+      }
+    },
+  }),
+
+  list_payment_authority: tool({
+    description: "List which addresses the agent is allowed to pay and each one's per-payment cap.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      return getDb()
+        .select()
+        .from(allowlist)
+        .all()
+        .map((r) => ({
+          address: r.address,
+          label: r.label,
+          capUsdc: baseUnitsToUsdc(BigInt(r.capBaseUnits)),
+        }));
     },
   }),
 

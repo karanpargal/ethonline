@@ -1,5 +1,5 @@
 import "./env.js";
-import { activity, getDb, invoices, payees } from "@autocfo/shared/db";
+import { activity, allowlist, getDb, invoices, payees } from "@autocfo/shared/db";
 import { usdcToBaseUnits } from "@autocfo/shared";
 
 // Short, distinct ids — long UUIDs get garbled by LLM tool calls.
@@ -17,8 +17,36 @@ if (process.argv.includes("--reset")) {
   db.delete(activity).run();
   db.delete(invoices).run();
   db.delete(payees).run();
-  console.log("Cleared existing payees, invoices, and activity.");
+  db.delete(allowlist).run();
+  console.log("Cleared existing payees, invoices, allowlist, and activity.");
 }
+
+// Baseline payment authority (mirrors the initial Privy policy): both Arc
+// vendors + the petty-cash wallet, each capped at the default per-tx cap.
+const defaultCap = usdcToBaseUnits(process.env.PER_TX_CAP_USDC ?? "10").toString();
+const pettyCashAddress = "0x158D69B73b12C3b8116A1aFF06a7E327371B3c3d";
+db.insert(allowlist)
+  .values([
+    {
+      address: process.env.SEED_PAYEE_1 ?? "0x1111111111111111111111111111111111111111",
+      label: "NimbusHost Cloud",
+      capBaseUnits: defaultCap,
+      createdAt: new Date(),
+    },
+    {
+      address: process.env.SEED_PAYEE_2 ?? "0x2222222222222222222222222222222222222222",
+      label: "MarketFeed Data Inc",
+      capBaseUnits: defaultCap,
+      createdAt: new Date(),
+    },
+    {
+      address: pettyCashAddress,
+      label: "Petty cash wallet",
+      capBaseUnits: defaultCap,
+      createdAt: new Date(),
+    },
+  ])
+  .run();
 
 const now = Date.now();
 const day = 24 * 60 * 60 * 1000;

@@ -11,7 +11,7 @@ import {
   getChainProfile,
   usdcToBaseUnits,
 } from "@autocfo/shared";
-import { runCfoTick } from "./agent.js";
+import { resetChat, runCfoChat, runCfoTick } from "./agent.js";
 import { publicClient, sendUsdcFromTreasury } from "./privy.js";
 import { pettyCashState } from "./pettycash.js";
 import { startSeller } from "./seller.js";
@@ -26,6 +26,18 @@ app.post("/agent/tick", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const result = await runCfoTick(body.instruction);
   return c.json(result);
+});
+
+app.post("/agent/chat", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  if (!body.message) return c.json({ error: "message required" }, 400);
+  const result = await runCfoChat(String(body.message));
+  return c.json(result);
+});
+
+app.post("/agent/chat/reset", (c) => {
+  resetChat();
+  return c.json({ reset: true });
 });
 
 app.get("/payees", (c) => {

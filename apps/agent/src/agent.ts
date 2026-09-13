@@ -1,4 +1,4 @@
-import { generateText, stepCountIs } from "ai";
+import { generateText, stepCountIs, type ModelMessage } from "ai";
 import { getModel } from "./provider.js";
 import { cfoTools } from "./tools.js";
 import { materializeRecurring } from "./recurring.js";
@@ -11,7 +11,9 @@ Your operating rules:
 3. Before paying, check treasury state. If paying an invoice would leave less than 20% of the current balance, escalate instead of paying, even if policy would allow it.
 4. Watch for anomalies: duplicate invoices (same payee, same amount, close due dates), amounts wildly above a payee's history, or payees not on the allowlist. For duplicates, pay the EARLIER-created invoice normally and flag only the later copy.
 5. When asked to onboard a payee AND set up regular payments, do both: onboard_payee first, then create_recurring_payment with the returned payee — the schedule generates invoices automatically each interval.
-6. Be concise in your final summary: what you paid, what you escalated, what you flagged, and why.`;
+6. Payment authority is a HUMAN decision. Onboarding gives a payee an identity, not money. Before calling grant_payment_authority you must have, in this conversation, an explicit human confirmation of BOTH the address and the per-payment cap. When a request implies paying someone new, first do the identity work, then ASK: "Should I add <name> (<address>) to the payment allowlist, and what per-payment cap?" Wait for the answer. Never invent a cap.
+7. You are in a conversation: when a request is ambiguous or needs a human decision, ask a short, concrete question instead of guessing. Once the human answers, act without re-asking.
+8. Be concise: say what you did, what you're asking, and why.`;
 
 export async function runCfoTick(instruction?: string) {
   // Standing schedules become real invoices BEFORE the model runs — payroll
@@ -33,5 +35,34 @@ export async function runCfoTick(instruction?: string) {
     steps: result.steps.map((s) => ({
       toolCalls: s.toolCalls.map((c) => ({ tool: c.toolName, input: c.input })),
     })),
+  };
+}
+
+// ---- Multi-turn chat (single-user demo: history lives in process memory) ----
+
+let chatHistory: ModelMessage[] = [];
+
+export function resetChat() {
+  chatHistory = [];
+}
+
+export async function runCfoChat(userMessage: string) {
+  materializeRecurring();
+  chatHistory.push({ role: "user", content: userMessage });
+  const result = await generateText({
+    model: getModel(),
+    system: SYSTEM,
+    messages: chatHistory,
+    tools: cfoTools,
+    stopWhen: stepCountIs(Number(process.env.AGENT_MAX_STEPS ?? 10)),
+    maxOutputTokens: Number(process.env.AGENT_MAX_OUTPUT_TOKENS ?? 1200),
+  });
+  // Keep the full assistant/tool trace so follow-up turns have context.
+  chatHistory.push(...result.response.messages);
+  // Trim runaway histories (cost control): keep the last 40 messages.
+  if (chatHistory.length > 40) chatHistory = chatHistory.slice(-40);
+  return {
+    reply: result.text,
+    toolsUsed: result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),
   };
 }

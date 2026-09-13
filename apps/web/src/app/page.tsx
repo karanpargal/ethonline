@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   formatUsdc,
@@ -42,7 +42,6 @@ export default function Dashboard() {
   const [tick, setTick] = useState<TickResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [instruction, setInstruction] = useState("");
   const [approving, setApproving] = useState<string | null>(null);
 
   const decide = async (invoiceId: string, action: "approve" | "reject") => {
@@ -83,9 +82,8 @@ export default function Dashboard() {
     setRunning(true);
     setTick(null);
     try {
-      const result = await api.tick(instruction.trim() || undefined);
+      const result = await api.tick();
       setTick(result);
-      setInstruction("");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -110,22 +108,13 @@ export default function Dashboard() {
             Autonomous treasury · mandate enforced by policy, not prompt
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <input
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !running && runTick()}
-            placeholder="Instruct the CFO… (optional)"
-            className="w-72 border border-line-strong bg-field-raised px-3 py-2 text-sm placeholder:text-ink-faint focus:border-ink focus:outline-none"
-          />
-          <button
-            onClick={runTick}
-            disabled={running}
-            className="border border-ink bg-ink px-4 py-2 text-sm font-medium text-field transition hover:bg-ink/85 disabled:opacity-40"
-          >
-            {running ? "Working…" : "Run tick"}
-          </button>
-        </div>
+        <button
+          onClick={runTick}
+          disabled={running}
+          className="border border-ink bg-ink px-4 py-2 text-sm font-medium text-field transition hover:bg-ink/85 disabled:opacity-40"
+        >
+          {running ? "Working…" : "Run tick"}
+        </button>
       </header>
 
       {error && (
@@ -260,7 +249,7 @@ export default function Dashboard() {
             </tbody>
           </table>
 
-          {/* Agent memo */}
+          {/* Agent memo (from Run tick) */}
           {tick && (
             <div className="mt-8 border-l-2 border-brass bg-field-raised p-5">
               <div className="micro-label">Memo from the CFO agent</div>
@@ -276,6 +265,8 @@ export default function Dashboard() {
               )}
             </div>
           )}
+
+          <Chat onActed={refresh} />
         </section>
 
         {/* Audit trail */}
@@ -328,6 +319,111 @@ export default function Dashboard() {
         Mandate: allowlisted payees · per-tx cap · daily budget — enforced by
         Privy policies in a TEE. Over-mandate spend requires human MFA approval.
       </footer>
+    </div>
+  );
+}
+
+interface ChatMsg {
+  role: "user" | "agent";
+  text: string;
+  tools?: string[];
+}
+
+function Chat({ onActed }: { onActed: () => Promise<void> }) {
+  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs, busy]);
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setDraft("");
+    setMsgs((m) => [...m, { role: "user", text }]);
+    setBusy(true);
+    try {
+      const { reply, toolsUsed } = await api.chat(text);
+      setMsgs((m) => [...m, { role: "agent", text: reply, tools: toolsUsed }]);
+      await onActed();
+    } catch (e) {
+      setMsgs((m) => [
+        ...m,
+        { role: "agent", text: `⚠ ${e instanceof Error ? e.message : String(e)}` },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = async () => {
+    await api.chatReset().catch(() => {});
+    setMsgs([]);
+  };
+
+  return (
+    <div className="mt-8 border border-line bg-field-raised">
+      <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+        <span className="micro-label">Talk to your CFO</span>
+        {msgs.length > 0 && (
+          <button onClick={clear} className="micro-label hover:text-ink">
+            clear
+          </button>
+        )}
+      </div>
+      <div className="max-h-96 space-y-4 overflow-y-auto px-4 py-4">
+        {msgs.length === 0 && (
+          <p className="text-sm text-ink-faint">
+            Try: “onboard a new payee called karan with address 0x… and pay him
+            8 USDC each month” — the agent will ask you before granting payment
+            authority.
+          </p>
+        )}
+        {msgs.map((m, i) =>
+          m.role === "user" ? (
+            <div key={i} className="flex justify-end">
+              <div className="max-w-[85%] border border-line-strong bg-field-sunken px-3 py-2 text-sm">
+                {m.text}
+              </div>
+            </div>
+          ) : (
+            <div key={i} className="max-w-[92%] border-l-2 border-brass pl-3">
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">{m.text}</p>
+              {m.tools && m.tools.length > 0 && (
+                <p className="font-ledger mt-1 text-[11px] text-ink-faint">
+                  {m.tools.join(" → ")}
+                </p>
+              )}
+            </div>
+          ),
+        )}
+        {busy && (
+          <div className="border-l-2 border-line pl-3 text-sm text-ink-faint">
+            thinking…
+          </div>
+        )}
+        <div ref={endRef} />
+      </div>
+      <div className="flex gap-2 border-t border-line p-3">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Message the CFO…"
+          disabled={busy}
+          className="flex-1 border border-line-strong bg-field px-3 py-2 text-sm placeholder:text-ink-faint focus:border-ink focus:outline-none disabled:opacity-50"
+        />
+        <button
+          onClick={send}
+          disabled={busy || !draft.trim()}
+          className="border border-ink bg-ink px-4 py-2 text-sm text-field transition hover:bg-ink/85 disabled:opacity-40"
+        >
+          send
+        </button>
+      </div>
     </div>
   );
 }
