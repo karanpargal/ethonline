@@ -1023,7 +1023,7 @@ function PrivyAuthPanel({
   if (!authenticated) {
     return (
       <button onClick={login} className="btn btn-secondary w-full">
-        Sign in with Privy — email verified, no access code needed
+        Sign in with Privy
       </button>
     );
   }
