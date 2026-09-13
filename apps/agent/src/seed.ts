@@ -34,6 +34,7 @@ db.insert(payees)
     {
       id: vendorIds.hosting,
       name: "NimbusHost Cloud",
+      ensName: process.env.ENS_USER_REGISTRY ? "nimbushost.autocfo.eth" : null,
       address: process.env.SEED_PAYEE_1 ?? "0x1111111111111111111111111111111111111111",
       preferredChain: "arc-testnet",
       allowlisted: true,
@@ -42,6 +43,7 @@ db.insert(payees)
     {
       id: vendorIds.dataApi,
       name: "MarketFeed Data Inc",
+      ensName: process.env.ENS_USER_REGISTRY ? "marketfeed.autocfo.eth" : null,
       address: process.env.SEED_PAYEE_2 ?? "0x2222222222222222222222222222222222222222",
       preferredChain: "arc-testnet",
       allowlisted: true,
@@ -50,6 +52,7 @@ db.insert(payees)
     {
       id: vendorIds.contractor,
       name: "Dana Contractor",
+      ensName: process.env.ENS_USER_REGISTRY ? "dana.autocfo.eth" : null,
       address: process.env.SEED_PAYEE_3 ?? "0x3333333333333333333333333333333333333333",
       preferredChain: "base-sepolia",
       allowlisted: true,
