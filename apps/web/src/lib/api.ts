@@ -1,4 +1,6 @@
-const BASE = process.env.NEXT_PUBLIC_AGENT_API ?? "http://localhost:3001";
+// Trailing slashes in the env var would produce "//orgs", which misses the
+// public route and 401s — normalize defensively.
+const BASE = (process.env.NEXT_PUBLIC_AGENT_API ?? "http://localhost:3001").replace(/\/+$/, "");
 
 const TOKEN_KEY = "autocfo_token";
 export const getToken = () =>
