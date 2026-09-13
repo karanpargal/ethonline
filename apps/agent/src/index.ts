@@ -34,6 +34,18 @@ type Env = { Variables: { org: OrgContext } };
 const app = new Hono<Env>();
 app.use("*", cors());
 
+// Request log (Railway: visible in deploy logs). Health checks and onboarding
+// status polls are skipped to keep the stream readable.
+app.use("*", async (c, next) => {
+  const start = Date.now();
+  await next();
+  const path = c.req.path;
+  if (path === "/health" || path.startsWith("/orgs/status/")) return;
+  console.log(
+    `[http] ${c.req.method} ${path} → ${c.res.status} ${Date.now() - start}ms org=${c.get("org")?.orgId ?? "-"}`,
+  );
+});
+
 // ---------- public ----------
 
 app.get("/health", (c) => c.json({ ok: true }));
@@ -81,6 +93,7 @@ app.post("/orgs", async (c) => {
   }
   if (!email) return c.json({ error: "email required" }, 400);
 
+  console.log(`[orgs] onboarding requested name="${body.name}" privy=${privyUserId ?? "no"}`);
   const jobId = newToken().slice(5, 21);
   const job: OnboardJob = { steps: [], result: null, error: null };
   onboardJobs.set(jobId, job);
@@ -101,7 +114,7 @@ app.post("/orgs", async (c) => {
       job.result = result;
     })
     .catch((err) => {
-      console.error("onboarding failed:", err);
+      console.error(`[orgs] onboarding FAILED job=${jobId}:`, err);
       job.error = String(err instanceof Error ? err.message : err);
     });
   return c.json({ jobId });

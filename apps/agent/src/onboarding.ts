@@ -72,14 +72,17 @@ export async function onboardOrg(
   caps?: { perTxCapUsdc?: string; dailyCapUsdc?: string },
   opts?: { privyUserId?: string | null; onStep?: StepReporter },
 ): Promise<OnboardResult> {
-  const step = opts?.onStep ?? (() => {});
+  const step = (label: string) => {
+    console.log(`[onboard:${name}] ${label}`);
+    opts?.onStep?.(label);
+  };
   const db = getDb();
-  let slug = slugify(name);
-  if (!slug) throw new Error("org name must contain letters or numbers");
-  // Keep slugs unique.
-  let n = 1;
-  while (db.select().from(orgs).where(eq(orgs.id, slug)).get())
-    slug = `${slugify(name)}-${++n}`;
+  const base = slugify(name);
+  if (!base) throw new Error("org name must contain letters or numbers");
+  // Keep slugs unique: acme, acme-1, acme-2, …
+  let slug = base;
+  let n = 0;
+  while (db.select().from(orgs).where(eq(orgs.id, slug)).get()) slug = `${base}-${++n}`;
 
   const privy: PrivyClient = getPrivy();
 
@@ -175,6 +178,9 @@ export async function onboardOrg(
     })
     .run();
 
+  console.log(
+    `[onboard:${name}] complete org=${slug} treasury=${wallet.address} ens=${ensLabel ?? "none"}`,
+  );
   return {
     orgId: slug,
     token,
@@ -202,10 +208,13 @@ async function provisionOrgEns(
   const pub = ensPublicClient();
   const me = owner.account.address;
 
+  let txIdx = 0;
   const send = async (to: Address, data: `0x${string}`) => {
     const hash = await owner.sendTransaction({ to, data });
+    console.log(`[ens:${slug}] tx ${++txIdx} sent ${hash} → waiting…`);
     const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 60_000 });
     if (receipt.status !== "success") throw new Error(`ens tx reverted: ${hash}`);
+    console.log(`[ens:${slug}] tx ${txIdx} confirmed (block ${receipt.blockNumber})`);
   };
 
   // Deploy the org's own subregistry

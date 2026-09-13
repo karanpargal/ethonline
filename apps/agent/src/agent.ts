@@ -18,7 +18,9 @@ Your operating rules:
 export async function runCfoTick(instruction?: string) {
   // Standing schedules become real invoices BEFORE the model runs — payroll
   // amounts and dates come from code, never from the LLM.
-  materializeRecurring();
+  const started = Date.now();
+  const materialized = materializeRecurring();
+  if (materialized) console.log(`[tick] materialized ${materialized} recurring invoice(s)`);
   const result = await generateText({
     model: getModel(),
     system: SYSTEM,
@@ -30,6 +32,9 @@ export async function runCfoTick(instruction?: string) {
     // Per-step output cap keeps API spend low; tool calls are small.
     maxOutputTokens: Number(process.env.AGENT_MAX_OUTPUT_TOKENS ?? 1200),
   });
+  console.log(
+    `[tick] done in ${Date.now() - started}ms tools=[${result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)).join(",")}]`,
+  );
   return {
     summary: result.text,
     steps: result.steps.map((s) => ({
@@ -69,8 +74,7 @@ export async function runCfoChat(userMessage: string) {
     chatHistory = chatHistory.slice(-40);
     chatHistories.set(orgId, chatHistory);
   }
-  return {
-    reply: result.text,
-    toolsUsed: result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName)),
-  };
+  const toolsUsed = result.steps.flatMap((s) => s.toolCalls.map((c) => c.toolName));
+  console.log(`[chat:${orgId}] turn done tools=[${toolsUsed.join(",")}]`);
+  return { reply: result.text, toolsUsed };
 }

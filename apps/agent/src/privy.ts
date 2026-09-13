@@ -96,6 +96,7 @@ export async function sendUsdcFromTreasury(
       },
       authorization_context: authContext(signer),
     });
+    console.log(`[treasury:${currentOrg().orgId}] sent ${baseUnits} to ${to} via privy-broadcast (${hash}, signer=${signer})`);
     return { hash, mode: "privy-broadcast" };
   }
 
@@ -127,6 +128,7 @@ export async function sendUsdcFromTreasury(
   const hash = await pub.sendRawTransaction({
     serializedTransaction: signed.signed_transaction as `0x${string}`,
   });
+  console.log(`[treasury:${currentOrg().orgId}] sent ${baseUnits} to ${to} via sign-local (${hash}, signer=${signer})`);
   return { hash, mode: "sign-local" };
 }
 
