@@ -33,6 +33,8 @@ export interface OnboardResult {
   ensName: string | null;
 }
 
+export type StepReporter = (step: string) => void;
+
 function sanitizeCap(v: string | undefined, fallback: string): string {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 && n <= 1_000_000 ? String(n) : fallback;
@@ -50,7 +52,9 @@ export async function onboardOrg(
   name: string,
   email: string,
   caps?: { perTxCapUsdc?: string; dailyCapUsdc?: string },
+  opts?: { privyUserId?: string | null; onStep?: StepReporter },
 ): Promise<OnboardResult> {
+  const step = opts?.onStep ?? (() => {});
   const db = getDb();
   let slug = slugify(name);
   if (!slug) throw new Error("org name must contain letters or numbers");
@@ -62,6 +66,7 @@ export async function onboardOrg(
   const privy: PrivyClient = getPrivy();
 
   // 1. Keys + quorums (custodied)
+  step("Generating signing keys");
   const adminKey = await generateP256KeyPair();
   const agentKey = await generateP256KeyPair();
   const agentQuorum = await privy.keyQuorums().create({
@@ -75,6 +80,7 @@ export async function onboardOrg(
     display_name: `${slug} owners`,
   });
 
+  step("Creating your organization & spending mandate");
   // 2. Privy organization + empty mandate policy (allowlist starts empty —
   //    payment authority is granted per payee via human-confirmed chat)
   const privyOrg = await privy.organizations().create({
@@ -89,6 +95,7 @@ export async function onboardOrg(
     rules: [],
   });
 
+  step("Creating the treasury wallet (agent bounded by policy)");
   // 3. Treasury wallet, agent attached as bounded signer at create time
   const wallet = await privy.wallets().create({
     chain_type: "ethereum",
@@ -100,6 +107,7 @@ export async function onboardOrg(
     ],
   });
 
+  step("Setting up the petty-cash account");
   // 4. Petty-cash EOA (custodied)
   const pettyPk = generatePrivateKey();
   const pettyAddress = privateKeyToAccount(pettyPk).address;
@@ -107,6 +115,7 @@ export async function onboardOrg(
   // 5. ENS subname + per-org subregistry (best-effort)
   let ensLabel: string | null = null;
   let ensRegistry: string | null = null;
+  step("Minting your ENS name on Sepolia (the slow part)");
   try {
     const provisioned = await provisionOrgEns(slug, wallet.address as Address);
     ensLabel = provisioned.label;
@@ -116,6 +125,7 @@ export async function onboardOrg(
   }
 
   // 6. Persist + issue the access token
+  step("Issuing your access token");
   const token = newToken();
   db.insert(orgs)
     .values({
@@ -123,6 +133,7 @@ export async function onboardOrg(
       name,
       email,
       tokenHash: hashToken(token),
+      privyUserId: opts?.privyUserId ?? null,
       privyOrgId: privyOrg.id,
       walletId: wallet.id,
       treasuryAddress: wallet.address,

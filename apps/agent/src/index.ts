@@ -24,7 +24,10 @@ import { publicClient, sendUsdcFromTreasury } from "./privy.js";
 import { pettyCashState } from "./pettycash.js";
 import { startSeller } from "./seller.js";
 import { logActivity } from "./activity.js";
-import { onboardOrg } from "./onboarding.js";
+import { onboardOrg, type OnboardResult } from "./onboarding.js";
+import { privyUserEmail, verifyPrivyUser } from "./privy-auth.js";
+import { orgs as orgsTable } from "@autocfo/shared/db";
+import { hashToken, newToken } from "./org.js";
 import { currentOrg, envOrg, orgFromToken, runWithOrg, type OrgContext } from "./org.js";
 
 type Env = { Variables: { org: OrgContext } };
@@ -35,21 +38,104 @@ app.use("*", cors());
 
 app.get("/health", (c) => c.json({ ok: true }));
 
-// Self-serve onboarding: provisions a full custodied tenant (~30-60s).
+// Self-serve onboarding runs as a background job so the client can render
+// step-by-step progress (provisioning takes ~a minute, mostly Sepolia txs).
+interface OnboardJob {
+  steps: { label: string; status: "running" | "done" }[];
+  result: OnboardResult | null;
+  error: string | null;
+}
+const onboardJobs = new Map<string, OnboardJob>();
+
+// Extracts + verifies an OPTIONAL Privy access token from the request.
+async function privyUserFrom(c: { req: { header(n: string): string | undefined } }) {
+  const auth = c.req.header("Authorization");
+  if (!auth?.startsWith("Bearer ") || auth.slice(7).startsWith("acfo_")) return null;
+  return verifyPrivyUser(auth.slice(7).trim());
+}
+
 app.post("/orgs", async (c) => {
   const body = await c.req.json().catch(() => null);
-  if (!body?.name || !body?.email)
-    return c.json({ error: "name and email required" }, 400);
+  if (!body?.name) return c.json({ error: "name required" }, 400);
+
+  // Privy-authenticated onboarding: verified email, and log-back-in later.
+  let privyUserId: string | null = null;
+  let email = String(body.email ?? "");
   try {
-    const result = await onboardOrg(String(body.name), String(body.email), {
-      perTxCapUsdc: body.perTxCapUsdc,
-      dailyCapUsdc: body.dailyCapUsdc,
-    });
-    return c.json(result);
-  } catch (err) {
-    console.error("onboarding failed:", err);
-    return c.json({ error: String(err instanceof Error ? err.message : err) }, 500);
+    privyUserId = await privyUserFrom(c);
+  } catch {
+    return c.json({ error: "invalid Privy session — sign in again" }, 401);
   }
+  if (privyUserId) {
+    const existing = getDb()
+      .select()
+      .from(orgsTable)
+      .where(eq(orgsTable.privyUserId, privyUserId))
+      .get();
+    if (existing)
+      return c.json(
+        { error: `you already have an org (${existing.name}) — use "Sign in with Privy"` },
+        409,
+      );
+    email = (await privyUserEmail(privyUserId)) ?? email;
+  }
+  if (!email) return c.json({ error: "email required" }, 400);
+
+  const jobId = newToken().slice(5, 21);
+  const job: OnboardJob = { steps: [], result: null, error: null };
+  onboardJobs.set(jobId, job);
+  onboardOrg(
+    String(body.name),
+    email,
+    { perTxCapUsdc: body.perTxCapUsdc, dailyCapUsdc: body.dailyCapUsdc },
+    {
+      privyUserId,
+      onStep: (label) => {
+        job.steps.forEach((st) => (st.status = "done"));
+        job.steps.push({ label, status: "running" });
+      },
+    },
+  )
+    .then((result) => {
+      job.steps.forEach((st) => (st.status = "done"));
+      job.result = result;
+    })
+    .catch((err) => {
+      console.error("onboarding failed:", err);
+      job.error = String(err instanceof Error ? err.message : err);
+    });
+  return c.json({ jobId });
+});
+
+app.get("/orgs/status/:jobId", (c) => {
+  const job = onboardJobs.get(c.req.param("jobId"));
+  if (!job) return c.json({ error: "unknown job" }, 404);
+  return c.json(job);
+});
+
+// Log back in with Privy: verifies the session, rotates the org's access
+// token, and returns the fresh one (old tokens stop working).
+app.post("/orgs/login", async (c) => {
+  let privyUserId: string | null = null;
+  try {
+    privyUserId = await privyUserFrom(c);
+  } catch {
+    return c.json({ error: "invalid Privy session" }, 401);
+  }
+  if (!privyUserId) return c.json({ error: "Privy token required" }, 401);
+  const row = getDb()
+    .select()
+    .from(orgsTable)
+    .where(eq(orgsTable.privyUserId, privyUserId))
+    .get();
+  if (!row) return c.json({ error: "no org for this account — create one first" }, 404);
+  const token = newToken();
+  getDb()
+    .update(orgsTable)
+    .set({ tokenHash: hashToken(token) })
+    .where(eq(orgsTable.id, row.id))
+    .run();
+  return c.json({ orgId: row.id, name: row.name, token });
 });
 
 // ---------- tenant scope ----------

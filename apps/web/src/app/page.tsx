@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { PRIVY_ENABLED } from "./providers";
 import logoMark from "./icon.png";
 import {
   api,
@@ -10,6 +12,7 @@ import {
   getToken,
   setToken,
   UnauthorizedError,
+  type OnboardResult,
   type ActivityRow,
   type InvoiceRow,
   type Payee,
@@ -218,14 +221,16 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    if (needsOnboarding || showOnboarding) return;
     api.me().then(setMe).catch(() => {});
-  }, [needsOnboarding]);
+  }, [needsOnboarding, showOnboarding]);
 
   useEffect(() => {
+    if (needsOnboarding || showOnboarding) return; // no polling on the gate
     refresh();
     const t = setInterval(refresh, 5000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, needsOnboarding, showOnboarding]);
 
   const runTick = async () => {
     setRunning(true);
@@ -904,6 +909,79 @@ function KV({ label, value, num }: { label: string; value: React.ReactNode; num?
   );
 }
 
+function PrivyAuthPanel({
+  onLoggedIn,
+  onNeedsCreate,
+}: {
+  onLoggedIn: (token: string) => Promise<void>;
+  onNeedsCreate: (session: { email: string; token: string }) => void;
+}) {
+  const { ready, authenticated, user, login, logout, getAccessToken } = usePrivy();
+  const [checking, setChecking] = useState(false);
+  const [session, setSession] = useState<{ email: string } | null>(null);
+  const attempted = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !authenticated || attempted.current) return;
+    attempted.current = true;
+    (async () => {
+      setChecking(true);
+      try {
+        const token = (await getAccessToken()) ?? "";
+        try {
+          const r = await api.privyLogin(token);
+          await onLoggedIn(r.token);
+        } catch (e) {
+          if ((e as { status?: number }).status === 404) {
+            const email = user?.email?.address ?? "";
+            setSession({ email });
+            onNeedsCreate({ email, token });
+          } else {
+            throw e;
+          }
+        }
+      } catch {
+        attempted.current = false;
+      } finally {
+        setChecking(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, authenticated]);
+
+  if (!ready) return null;
+  if (!authenticated) {
+    return (
+      <button onClick={login} className="btn btn-secondary w-full">
+        Sign in with Privy — email verified, no access code needed
+      </button>
+    );
+  }
+  if (checking) {
+    return <p className="text-[14px] text-ink-muted">Checking your account…</p>;
+  }
+  if (session) {
+    return (
+      <div className="flex items-center justify-between rounded-2xl bg-mist px-4 py-3 text-[14px]">
+        <span>
+          Signed in as <strong>{session.email}</strong> — no org yet, create one below.
+        </span>
+        <button
+          onClick={() => {
+            attempted.current = false;
+            setSession(null);
+            logout();
+          }}
+          className="link"
+        >
+          switch
+        </button>
+      </div>
+    );
+  }
+  return null;
+}
+
 function Onboarding({
   onDone,
   onCancel,
@@ -917,16 +995,36 @@ function Onboarding({
   const [daily, setDaily] = useState("200");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [result, setResult] = useState<Awaited<ReturnType<typeof api.onboard>> | null>(null);
+  const [result, setResult] = useState<OnboardResult | null>(null);
+  const [steps, setSteps] = useState<{ label: string; status: "running" | "done" }[]>([]);
+  const [privySession, setPrivySession] = useState<{ email: string; token: string } | null>(null);
 
   const submit = async () => {
-    if (!name.trim() || !email.trim()) return setErr("Enter an organization name and email.");
+    const effectiveEmail = privySession?.email ?? email.trim();
+    if (!name.trim() || !effectiveEmail)
+      return setErr("Enter an organization name and email.");
     setBusy(true);
     setErr(null);
+    setSteps([]);
     try {
-      const r = await api.onboard(name.trim(), email.trim(), perTx, daily);
-      setToken(r.token);
-      setResult(r);
+      const { jobId } = await api.onboard(
+        { name: name.trim(), email: effectiveEmail, perTxCapUsdc: perTx, dailyCapUsdc: daily },
+        privySession?.token,
+      );
+      // Poll the job for step-by-step progress until it finishes.
+      const poll = async (): Promise<void> => {
+        const job = await api.onboardStatus(jobId);
+        setSteps(job.steps);
+        if (job.error) throw new Error(job.error);
+        if (job.result) {
+          setToken(job.result.token);
+          setResult(job.result);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+        return poll();
+      };
+      await poll();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -980,16 +1078,27 @@ function Onboarding({
           <span className="field-label">Organization name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} className="field mt-1.5" />
         </label>
-        <label className="block">
-          <span className="field-label">Your email</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            className="field mt-1.5"
+        {PRIVY_ENABLED && (
+          <PrivyAuthPanel
+            onLoggedIn={async (token) => {
+              setToken(token);
+              await onDone();
+            }}
+            onNeedsCreate={(session) => setPrivySession(session)}
           />
-        </label>
+        )}
+        {!privySession && (
+          <label className="block">
+            <span className="field-label">Your email</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+              className="field mt-1.5"
+            />
+          </label>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="block">
             <span className="field-label">Per-payment cap</span>
@@ -1023,6 +1132,20 @@ function Onboarding({
         <button onClick={submit} disabled={busy} className="btn btn-primary btn-lg !mt-6 w-full">
           {busy ? "Setting up treasury, policy and ENS name (about a minute)…" : "Create my CFO"}
         </button>
+        {busy && steps.length > 0 && (
+          <ol className="space-y-1.5 rounded-2xl bg-mist p-4 text-[14px]">
+            {steps.map((st) => (
+              <li key={st.label} className="flex items-center gap-2">
+                {st.status === "done" ? (
+                  <span className="text-paid">✓</span>
+                ) : (
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-line-strong border-t-signal" />
+                )}
+                <span className={st.status === "done" ? "text-ink-muted" : ""}>{st.label}</span>
+              </li>
+            ))}
+          </ol>
+        )}
         {err && (
           <p role="alert" className="text-[14px] text-stop">
             {err}

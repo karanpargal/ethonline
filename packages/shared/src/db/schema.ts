@@ -8,6 +8,9 @@ export const orgs = sqliteTable("orgs", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   tokenHash: text("token_hash").notNull(),
+  // Privy user id of the org creator — lets them log back in with Privy email
+  // auth instead of the access token.
+  privyUserId: text("privy_user_id"),
   privyOrgId: text("privy_org_id").notNull(),
   walletId: text("wallet_id").notNull(),
   treasuryAddress: text("treasury_address").notNull(),

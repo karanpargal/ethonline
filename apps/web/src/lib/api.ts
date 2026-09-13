@@ -88,6 +88,14 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json();
 }
 
+export interface OnboardResult {
+  orgId: string;
+  token: string;
+  treasuryAddress: string;
+  pettyCashAddress: string;
+  ensName: string | null;
+}
+
 export interface Payee {
   id: string;
   name: string;
@@ -122,14 +130,48 @@ export const api = {
     }>("/me"),
   authority: () =>
     get<{ address: string; label: string; capUsdc: string }[]>("/authority"),
-  onboard: (name: string, email: string, perTxCapUsdc?: string, dailyCapUsdc?: string) =>
-    post<{
-      orgId: string;
-      token: string;
-      treasuryAddress: string;
-      pettyCashAddress: string;
-      ensName: string | null;
-    }>("/orgs", { name, email, perTxCapUsdc, dailyCapUsdc }),
+  onboard: async (
+    input: {
+      name: string;
+      email?: string;
+      perTxCapUsdc?: string;
+      dailyCapUsdc?: string;
+    },
+    privyToken?: string,
+  ): Promise<{ jobId: string }> => {
+    const res = await fetch(`${BASE}/orgs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(privyToken ? { Authorization: `Bearer ${privyToken}` } : {}),
+      },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error ?? `onboard: ${res.status}`);
+    }
+    return res.json();
+  },
+  onboardStatus: (jobId: string) =>
+    get<{
+      steps: { label: string; status: "running" | "done" }[];
+      result: OnboardResult | null;
+      error: string | null;
+    }>(`/orgs/status/${jobId}`),
+  privyLogin: async (privyToken: string) => {
+    const res = await fetch(`${BASE}/orgs/login`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${privyToken}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const e = new Error(err.error ?? `login: ${res.status}`) as Error & { status?: number };
+      e.status = res.status;
+      throw e;
+    }
+    return res.json() as Promise<{ orgId: string; name: string; token: string }>;
+  },
   createInvoice: (input: {
     payeeId: string;
     amountUsdc: string;
