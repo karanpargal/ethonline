@@ -102,7 +102,11 @@ export const cfoTools = {
     inputSchema: z.object({ invoiceId: z.string() }),
     execute: async ({ invoiceId }) => {
       const db = getDb();
-      const inv = db.select().from(invoices).where(eq(invoices.id, invoiceId)).get();
+      const inv = db
+        .select()
+        .from(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, currentOrg().orgId)))
+        .get();
       if (!inv) return { error: "invoice not found" };
       if (inv.status !== "pending") return { error: `invoice is ${inv.status}` };
       const payee = db.select().from(payees).where(eq(payees.id, inv.payeeId)).get();
@@ -182,7 +186,11 @@ export const cfoTools = {
     }),
     execute: async ({ invoiceId, justification }) => {
       const db = getDb();
-      const inv = db.select().from(invoices).where(eq(invoices.id, invoiceId)).get();
+      const inv = db
+        .select()
+        .from(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, currentOrg().orgId)))
+        .get();
       if (!inv) return { error: "invoice not found" };
       if (inv.status !== "pending") return { error: `invoice is ${inv.status}` };
       const payee = db.select().from(payees).where(eq(payees.id, inv.payeeId)).get();
@@ -283,7 +291,11 @@ export const cfoTools = {
     inputSchema: z.object({ invoiceId: z.string() }),
     execute: async ({ invoiceId }) => {
       const db = getDb();
-      const inv = db.select().from(invoices).where(eq(invoices.id, invoiceId)).get();
+      const inv = db
+        .select()
+        .from(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, currentOrg().orgId)))
+        .get();
       if (!inv) return { error: "invoice not found" };
       if (inv.status !== "pending") return { error: `invoice is ${inv.status}` };
       const payee = db.select().from(payees).where(eq(payees.id, inv.payeeId)).get();
@@ -365,6 +377,10 @@ export const cfoTools = {
       }
       try {
         const { rules } = await syncPolicyFromAllowlist();
+        db.update(payees)
+          .set({ allowlisted: true })
+          .where(and(eq(payees.address, address), eq(payees.orgId, currentOrg().orgId)))
+          .run();
         logActivity({
           kind: "agent_note",
           summary: `Payment authority ${existing ? "updated" : "granted"}: ${label} (${address.slice(0, 8)}…) cap $${capUsdc}/payment — human-confirmed, policy resynced (${rules} rules)`,
@@ -394,6 +410,60 @@ export const cfoTools = {
     },
   }),
 
+  list_payees: tool({
+    description:
+      "List all payees with their ids, ENS names, addresses, and preferred chains. Use this to find a payeeId for invoices or schedules.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      return getDb()
+        .select()
+        .from(payees)
+        .where(eq(payees.orgId, currentOrg().orgId))
+        .all()
+        .map((p) => ({
+          payeeId: p.id,
+          name: p.name,
+          ensName: p.ensName,
+          address: p.address,
+          preferredChain: p.preferredChain,
+        }));
+    },
+  }),
+
+  create_invoice: tool({
+    description:
+      "Record a bill in the ledger. Use this when a human asks you to pay someone for something and no invoice exists yet — create the invoice first, then pay it with pay_invoice (or payout_cross_chain for non-Arc payees).",
+    inputSchema: z.object({
+      payeeId: z.string().describe("from onboard_payee's result or list_payees"),
+      amountUsdc: z.string(),
+      memo: z.string(),
+      dueInDays: z.number().int().min(0).max(365).default(0).describe("0 = due today"),
+    }),
+    execute: async ({ payeeId, amountUsdc, memo, dueInDays }) => {
+      const db = getDb();
+      const payee = db
+        .select()
+        .from(payees)
+        .where(and(eq(payees.id, payeeId), eq(payees.orgId, currentOrg().orgId)))
+        .get();
+      if (!payee) return { error: `payee ${payeeId} not found — call list_payees` };
+      const id = `INV-${randomUUID().slice(0, 8)}`;
+      db.insert(invoices)
+        .values({
+          id,
+          orgId: currentOrg().orgId,
+          payeeId,
+          amountBaseUnits: usdcToBaseUnits(amountUsdc).toString(),
+          memo,
+          dueDate: new Date(Date.now() + dueInDays * 86_400_000),
+          status: "pending",
+          createdAt: new Date(),
+        })
+        .run();
+      return { invoiceId: id, created: true, payeeName: payee.name };
+    },
+  }),
+
   create_recurring_payment: tool({
     description:
       "Set up a standing payment schedule (payroll, subscription): every interval, an invoice is generated automatically and flows through the normal mandate — within-cap payments auto-pay, over-cap ones escalate for human approval. The payee must already exist (onboard_payee first if not).",
@@ -409,8 +479,13 @@ export const cfoTools = {
     }),
     execute: async ({ payeeId, amountUsdc, memo, intervalDays, startNow }) => {
       const db = getDb();
-      const payee = db.select().from(payees).where(eq(payees.id, payeeId)).get();
-      if (!payee) return { error: `payee ${payeeId} not found — onboard them first` };
+      const payee = db
+        .select()
+        .from(payees)
+        .where(and(eq(payees.id, payeeId), eq(payees.orgId, currentOrg().orgId)))
+        .get();
+      if (!payee)
+        return { error: `payee ${payeeId} not found in this org — call list_payees for valid ids` };
       const nextDue = startNow
         ? new Date()
         : new Date(Date.now() + intervalDays * 86_400_000);
@@ -460,10 +535,11 @@ export const cfoTools = {
           payoutAddress as `0x${string}`,
           preferredChain,
         );
+        const payeeId = `PAYEE-${randomUUID().slice(0, 8)}`;
         getDb()
           .insert(payees)
           .values({
-            id: `PAYEE-${randomUUID().slice(0, 8)}`,
+            id: payeeId,
             orgId: currentOrg().orgId,
             name: displayName,
             address: payoutAddress,
@@ -483,7 +559,7 @@ export const cfoTools = {
             note: "address NOT yet on the Privy allowlist — human action required",
           },
         });
-        return { onboarded: true, ensName: fullName, txHashes };
+        return { onboarded: true, payeeId, ensName: fullName, txHashes };
       } catch (err) {
         return { error: String(err instanceof Error ? err.message : err) };
       }
@@ -499,7 +575,11 @@ export const cfoTools = {
     }),
     execute: async ({ invoiceId, reason }) => {
       const db = getDb();
-      const inv = db.select().from(invoices).where(eq(invoices.id, invoiceId)).get();
+      const inv = db
+        .select()
+        .from(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, currentOrg().orgId)))
+        .get();
       if (!inv) return { error: `invoice ${invoiceId} not found — check the exact id` };
       db.update(invoices)
         .set({ status: "flagged" })
